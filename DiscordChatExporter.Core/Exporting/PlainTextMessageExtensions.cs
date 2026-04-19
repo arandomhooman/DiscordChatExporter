@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Linq;
 using DiscordChatExporter.Core.Discord.Data;
 using PowerKit.Extensions;

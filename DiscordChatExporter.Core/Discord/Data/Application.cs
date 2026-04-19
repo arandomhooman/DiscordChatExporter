@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using JsonExtensions.Reading;
 using PowerKit.Extensions;
 

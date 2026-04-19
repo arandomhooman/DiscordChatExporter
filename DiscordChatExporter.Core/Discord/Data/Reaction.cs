@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using PowerKit.Extensions;
 
 namespace DiscordChatExporter.Core.Discord.Data;

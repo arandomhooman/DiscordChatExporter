@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using CliFx.Binding;
 using CliFx.Infrastructure;
 using DiscordChatExporter.Cli.Commands.Base;

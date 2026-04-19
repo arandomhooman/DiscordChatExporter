@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Text.Json;
 using DiscordChatExporter.Core.Discord.Data.Common;
 using JsonExtensions.Reading;
