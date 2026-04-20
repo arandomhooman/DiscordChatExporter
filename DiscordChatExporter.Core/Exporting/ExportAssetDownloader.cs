@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
@@ -96,7 +95,7 @@ internal partial class ExportAssetDownloader
     private static string GetFileNameFromUrl(string url, string urlHash)
     {
         // Try to extract the file name from URL
-        var fileName = Regex.Match(url, @".+/([^?]*)").Groups[1].Value;
+        var fileName = new Uri(url, UriKind.RelativeOrAbsolute).TryGetFileName();
 
         // If it's not there, just use the URL hash as the file name
         if (string.IsNullOrWhiteSpace(fileName))
