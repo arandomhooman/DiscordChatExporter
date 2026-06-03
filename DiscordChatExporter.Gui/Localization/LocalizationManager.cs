@@ -73,6 +73,11 @@ public partial class LocalizationManager
     // ---- Dashboard ----
 
     public string PullGuildsTooltip => Get();
+    public string ContinueExportTooltip => Get();
+    public string ContinueExportUpToDateMessage => Get();
+    public string ContinueExportSuccessMessage => Get();
+    public string ContinueExportReverseUnsupportedMessage => Get();
+    public string ContinueExportPartitionedUnsupportedMessage => Get();
     public string SettingsTooltip => Get();
     public string LastMessageSentTooltip => Get();
     public string TokenPlaceholderText => Get();
@@ -116,6 +121,10 @@ public partial class LocalizationManager
     public string OutputPathTooltip => Get();
     public string FormatLabel => Get();
     public string FormatTooltip => Get();
+    public string CopyUserMessagesUserLabel => Get();
+    public string CopyUserMessagesUserTooltip => Get();
+    public string CopyUserMessagesButton => Get();
+    public string CopyUserMessagesButtonTooltip => Get();
     public string AfterDateLabel => Get();
     public string AfterDateTooltip => Get();
     public string BeforeDateLabel => Get();
@@ -162,4 +171,6 @@ public partial class LocalizationManager
     public string ErrorPullingChannelsTitle => Get();
     public string ErrorExportingTitle => Get();
     public string SuccessfulExportMessage => Get();
+    public string SuccessfulCopyUserMessagesMessage => Get();
+    public string NoCopyUserMessagesFoundMessage => Get();
 }

@@ -9,6 +9,13 @@ public partial class LocalizationManager
         {
             // Dashboard
             [nameof(PullGuildsTooltip)] = "Pull available servers and channels (Enter)",
+            [nameof(ContinueExportTooltip)] = "Continue an existing JSON export (add new messages)",
+            [nameof(ContinueExportUpToDateMessage)] = "That export is already up to date.",
+            [nameof(ContinueExportSuccessMessage)] = "Added {0} new message(s).",
+            [nameof(ContinueExportReverseUnsupportedMessage)] =
+                "Continuing reverse-ordered exports is not supported.",
+            [nameof(ContinueExportPartitionedUnsupportedMessage)] =
+                "Continuing partitioned exports is not supported.",
             [nameof(SettingsTooltip)] = "Settings",
             [nameof(LastMessageSentTooltip)] = "Last message sent:",
             [nameof(TokenPlaceholderText)] = "Token",
@@ -92,6 +99,12 @@ public partial class LocalizationManager
                 """,
             [nameof(FormatLabel)] = "Format",
             [nameof(FormatTooltip)] = "Export format",
+            [nameof(CopyUserMessagesUserLabel)] = "User to copy",
+            [nameof(CopyUserMessagesUserTooltip)] =
+                "Enter a username, display name, full Discord name, or user ID to copy only that user's messages as plain text.",
+            [nameof(CopyUserMessagesButton)] = "COPY",
+            [nameof(CopyUserMessagesButtonTooltip)] =
+                "Copy only this user's messages from the selected channel",
             [nameof(AfterDateLabel)] = "After (date)",
             [nameof(AfterDateTooltip)] = "Only include messages sent after this date",
             [nameof(BeforeDateLabel)] = "Before (date)",
@@ -152,5 +165,7 @@ public partial class LocalizationManager
             [nameof(ErrorPullingChannelsTitle)] = "Error pulling channels",
             [nameof(ErrorExportingTitle)] = "Error exporting channel(s)",
             [nameof(SuccessfulExportMessage)] = "Successfully exported {0} channel(s)",
+            [nameof(SuccessfulCopyUserMessagesMessage)] = "Copied messages from {0}",
+            [nameof(NoCopyUserMessagesFoundMessage)] = "No messages from {0} were found",
         };
 }
