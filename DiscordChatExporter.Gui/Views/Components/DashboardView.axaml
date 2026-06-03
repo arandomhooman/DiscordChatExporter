@@ -284,6 +284,26 @@
                 </ScrollViewer>
             </Panel>
 
+            <!--  Continue export button  -->
+            <Button
+                Width="56"
+                Height="56"
+                Margin="32,24,104,24"
+                Padding="0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Background="{DynamicResource MaterialDarkBackgroundBrush}"
+                Command="{Binding ContinueExportCommand}"
+                Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                IsVisible="{Binding $self.IsEffectivelyEnabled}"
+                Theme="{DynamicResource MaterialIconButton}"
+                ToolTip.Tip="{Binding LocalizationManager.ContinueExportTooltip}">
+                <materialIcons:MaterialIcon
+                    Width="32"
+                    Height="32"
+                    Kind="FileDocumentPlusOutline" />
+            </Button>
+
             <!--  Export button  -->
             <Button
                 Width="56"
