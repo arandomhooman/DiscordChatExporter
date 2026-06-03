@@ -1,19 +1,27 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Input.Platform;
+using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exceptions;
 using DiscordChatExporter.Core.Exporting;
+using DiscordChatExporter.Core.Exporting.Continuation;
+using DiscordChatExporter.Core.Exporting.Filtering;
+using DiscordChatExporter.Core.Exporting.Partitioning;
 using DiscordChatExporter.Gui.Framework;
 using DiscordChatExporter.Gui.Localization;
 using DiscordChatExporter.Gui.Models;
 using DiscordChatExporter.Gui.Services;
+using DiscordChatExporter.Gui.Utils.Extensions;
+using DiscordChatExporter.Gui.ViewModels.Dialogs;
 using Gress;
 using Gress.Completable;
 using PowerKit;
@@ -66,6 +74,7 @@ public partial class DashboardViewModel : ViewModelBase
     [NotifyCanExecuteChangedFor(nameof(PullGuildsCommand))]
     [NotifyCanExecuteChangedFor(nameof(PullChannelsCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ContinueExportCommand))]
     public partial bool IsBusy { get; set; }
 
     public LocalizationManager LocalizationManager { get; }
@@ -222,6 +231,79 @@ public partial class DashboardViewModel : ViewModelBase
     private bool CanExport() =>
         !IsBusy && _discord is not null && SelectedGuild is not null && SelectedChannels.Any();
 
+    private static async ValueTask SetClipboardTextAsync(string text)
+    {
+        var clipboard =
+            Avalonia.Application.Current?.ApplicationLifetime?.TryGetTopLevel()?.Clipboard
+            ?? throw new ApplicationException("Could not access the clipboard.");
+
+        await clipboard.SetTextAsync(text);
+    }
+
+    private async ValueTask CopyUserMessagesAsync(
+        ExportSetupViewModel dialog,
+        ChannelExporter exporter
+    )
+    {
+        var channel = dialog.Channels!.Single();
+        var progress = _progressMuxer.CreateInput();
+        var outputPath = Path.Combine(Path.GetTempPath(), $"{Program.Name}-{Guid.NewGuid():N}.txt");
+
+        try
+        {
+            var request = new ExportRequest(
+                dialog.Guild!,
+                channel,
+                outputPath,
+                null,
+                ExportFormat.PlainText,
+                dialog.After?.Pipe(Snowflake.FromDate),
+                dialog.Before?.Pipe(Snowflake.FromDate),
+                PartitionLimit.Null,
+                dialog.CopyUserMessagesFilter,
+                dialog.IsReverseMessageOrder,
+                dialog.ShouldFormatMarkdown,
+                false,
+                false,
+                _settingsService.Locale,
+                _settingsService.IsUtcNormalizationEnabled
+            );
+
+            await exporter.ExportChannelAsync(request, progress);
+
+            var text = await File.ReadAllTextAsync(outputPath);
+            var user = dialog.CopyUserMessagesUserValue?.Trim();
+
+            if (text.Length > 0)
+            {
+                await SetClipboardTextAsync(text);
+
+                _snackbarManager.Notify(
+                    string.Format(LocalizationManager.SuccessfulCopyUserMessagesMessage, user)
+                );
+            }
+            else
+            {
+                _snackbarManager.Notify(
+                    string.Format(LocalizationManager.NoCopyUserMessagesFoundMessage, user)
+                );
+            }
+        }
+        finally
+        {
+            progress.ReportCompletion();
+
+            try
+            {
+                File.Delete(outputPath);
+            }
+            catch
+            {
+                // Best-effort cleanup of the temporary export.
+            }
+        }
+    }
+
     [RelayCommand(CanExecute = nameof(CanExport))]
     private async Task ExportAsync()
     {
@@ -241,6 +323,12 @@ public partial class DashboardViewModel : ViewModelBase
                 return;
 
             var exporter = new ChannelExporter(_discord);
+
+            if (dialog.ShouldCopyUserMessages)
+            {
+                await CopyUserMessagesAsync(dialog, exporter);
+                return;
+            }
 
             var channelProgressPairs = dialog
                 .Channels!.Select(c => new { Channel = c, Progress = _progressMuxer.CreateInput() })
@@ -322,6 +410,148 @@ public partial class DashboardViewModel : ViewModelBase
         {
             IsBusy = false;
         }
+    }
+
+    private bool CanContinueExport() => !IsBusy && _discord is not null;
+
+    [RelayCommand(CanExecute = nameof(CanContinueExport))]
+    private async Task ContinueExportAsync()
+    {
+        if (_discord is null)
+            return;
+
+        // Pick the existing JSON export
+        var filePath = await _dialogManager.PromptSingleFilePathAsync([
+            new FilePickerFileType("JSON export") { Patterns = ["*.json"] },
+        ]);
+        if (string.IsNullOrWhiteSpace(filePath))
+            return;
+
+        // Refuse partitioned exports (name- or sibling-based detection)
+        if (IsPartitionedExportPath(filePath))
+        {
+            _snackbarManager.Notify(
+                LocalizationManager.ContinueExportPartitionedUnsupportedMessage.TrimEnd('.')
+            );
+            return;
+        }
+
+        IsBusy = true;
+        var progress = _progressMuxer.CreateInput();
+        var tempPath = Path.Combine(
+            Path.GetTempPath(),
+            $"{Program.Name}-continue-{Guid.NewGuid():N}.json"
+        );
+
+        try
+        {
+            var info = await JsonExportInspector.InspectAsync(filePath);
+
+            if (!info.IsChronological)
+            {
+                _snackbarManager.Notify(
+                    LocalizationManager.ContinueExportReverseUnsupportedMessage.TrimEnd('.')
+                );
+                return;
+            }
+
+            // Resolve live channel + guild
+            var channel = await _discord.GetChannelAsync(info.ChannelId);
+            var guild = channel.IsDirect
+                ? Guild.DirectMessages
+                : await _discord.GetGuildAsync(channel.GuildId);
+
+            // Export only messages after the recorded cutoff into a temp file
+            var request = new ExportRequest(
+                guild,
+                channel,
+                tempPath,
+                null,
+                ExportFormat.Json,
+                info.LastMessageId, // exact, exclusive cursor
+                info.Before,
+                PartitionLimit.Null,
+                MessageFilter.Null,
+                false,
+                _settingsService.LastShouldFormatMarkdown,
+                false,
+                false,
+                _settingsService.Locale,
+                _settingsService.IsUtcNormalizationEnabled
+            );
+
+            var exporter = new ChannelExporter(_discord);
+
+            try
+            {
+                await exporter.ExportChannelAsync(request, progress);
+            }
+            catch (ChannelEmptyException)
+            {
+                _snackbarManager.Notify(
+                    LocalizationManager.ContinueExportUpToDateMessage.TrimEnd('.')
+                );
+                return;
+            }
+
+            // Merge the new messages into the original file
+            var addedBefore = info.MessageCount;
+            var total = await JsonExportMerger.MergeAsync(filePath, tempPath, DateTimeOffset.Now);
+            var added = total - addedBefore;
+
+            if (added <= 0)
+            {
+                _snackbarManager.Notify(
+                    LocalizationManager.ContinueExportUpToDateMessage.TrimEnd('.')
+                );
+            }
+            else
+            {
+                _snackbarManager.Notify(
+                    string.Format(LocalizationManager.ContinueExportSuccessMessage, added)
+                );
+            }
+        }
+        catch (DiscordChatExporterException ex) when (!ex.IsFatal)
+        {
+            _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+        }
+        catch (Exception ex)
+        {
+            var dialog = _viewModelManager.GetMessageBoxViewModel(
+                LocalizationManager.ErrorExportingTitle,
+                ex.ToString()
+            );
+            await _dialogManager.ShowDialogAsync(dialog);
+        }
+        finally
+        {
+            progress.ReportCompletion();
+            IsBusy = false;
+            try
+            {
+                File.Delete(tempPath);
+            }
+            catch
+            {
+                // Best-effort cleanup of the temporary export.
+            }
+        }
+    }
+
+    private static bool IsPartitionedExportPath(string filePath)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(filePath);
+        if (fileName.Contains(" [part ", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var dir = Path.GetDirectoryName(filePath);
+        var ext = Path.GetExtension(filePath);
+        if (string.IsNullOrEmpty(dir))
+            return false;
+
+        var sibling = Path.Combine(dir, $"{fileName} [part 2]{ext}");
+        return File.Exists(sibling);
     }
 
     protected override void Dispose(bool disposing)
