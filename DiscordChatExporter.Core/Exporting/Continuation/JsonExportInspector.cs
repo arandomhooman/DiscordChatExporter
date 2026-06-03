@@ -18,6 +18,9 @@ public static class JsonExportInspector
         byte[] bytes;
         try
         {
+            // Deliberately buffers the whole file into memory. This is acceptable because
+            // inspection is an occasional, user-initiated action over a realistic personal
+            // export size; we trade memory for a simple single-pass Utf8JsonReader.
             bytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -61,10 +64,10 @@ public static class JsonExportInspector
             switch (name)
             {
                 case "guild":
-                    guildId = ReadIdOf(ref reader);
+                    guildId = ReadIdOf(ref reader, "guild");
                     break;
                 case "channel":
-                    channelId = ReadIdOf(ref reader);
+                    channelId = ReadIdOf(ref reader, "channel");
                     break;
                 case "dateRange":
                     before = ReadBeforeOf(ref reader);
@@ -78,7 +81,9 @@ public static class JsonExportInspector
                         firstId ??= id;
                         firstTs ??= ts;
                         lastId = id;
-                        lastTs = ts;
+                        // Keep the last *non-null* timestamp so a message that lacks one
+                        // doesn't clobber a good cutoff and skew the chronological check.
+                        lastTs = ts ?? lastTs;
                         count++;
                     }
                     break;
@@ -111,11 +116,12 @@ public static class JsonExportInspector
     }
 
     // Reader is positioned on the StartObject of an object that has a string "id" property.
-    // Returns that id and leaves the reader on the object's EndObject.
-    private static Snowflake ReadIdOf(ref Utf8JsonReader reader)
+    // Returns that id and leaves the reader on the object's EndObject. The 'label' identifies
+    // which object (e.g. "guild"/"channel") so diagnostics can say what lacked an id.
+    private static Snowflake ReadIdOf(ref Utf8JsonReader reader, string label)
     {
         if (reader.TokenType != JsonTokenType.StartObject)
-            throw new InvalidJsonExportException("Expected an object.");
+            throw new InvalidJsonExportException($"Expected the '{label}' object.");
 
         Snowflake? id = null;
         while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
@@ -127,7 +133,7 @@ public static class JsonExportInspector
             else
                 reader.Skip();
         }
-        return id ?? throw new InvalidJsonExportException("Missing 'id'.");
+        return id ?? throw new InvalidJsonExportException($"The '{label}' object is missing 'id'.");
     }
 
     private static Snowflake? ReadBeforeOf(ref Utf8JsonReader reader)

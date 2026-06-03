@@ -41,8 +41,53 @@ public class JsonExportInspectorSpecs
         }
         """;
 
+    // Same ids (1000 then 2000) but the first message carries the LATER timestamp,
+    // so the export is stored out of chronological order.
+    private const string ReverseOrdered = """
+        {
+          "guild": { "id": "111", "name": "G" },
+          "channel": { "id": "222", "name": "C" },
+          "dateRange": { "after": null, "before": null },
+          "exportedAt": "2021-01-01T00:00:00+00:00",
+          "messages": [
+            { "id": "1000", "type": "Default", "timestamp": "2021-07-24T13:49:13+00:00", "content": "a" },
+            { "id": "2000", "type": "Default", "timestamp": "2021-07-19T13:34:18+00:00", "content": "b" }
+          ],
+          "messageCount": 2
+        }
+        """;
+
+    private const string WithBefore = """
+        {
+          "guild": { "id": "111", "name": "G" },
+          "channel": { "id": "222", "name": "C" },
+          "dateRange": { "after": null, "before": "2021-07-30T00:00:00+00:00" },
+          "exportedAt": "2021-01-01T00:00:00+00:00",
+          "messages": [
+            { "id": "1000", "type": "Default", "timestamp": "2021-07-19T13:34:18+00:00", "content": "a" },
+            { "id": "2000", "type": "Default", "timestamp": "2021-07-24T13:49:13+00:00", "content": "b" }
+          ],
+          "messageCount": 2
+        }
+        """;
+
+    // Messages with no "timestamp" field at all.
+    private const string NoTimestamps = """
+        {
+          "guild": { "id": "111", "name": "G" },
+          "channel": { "id": "222", "name": "C" },
+          "dateRange": { "after": null, "before": null },
+          "exportedAt": "2021-01-01T00:00:00+00:00",
+          "messages": [
+            { "id": "1000", "type": "Default", "content": "a" },
+            { "id": "2000", "type": "Default", "content": "b" }
+          ],
+          "messageCount": 2
+        }
+        """;
+
     [Fact]
-    public async Task It_reads_guild_channel_cutoff_and_count_from_a_valid_export()
+    public async Task I_can_read_guild_channel_cutoff_and_count_from_a_valid_export()
     {
         var path = await WriteTempAsync(TwoMessages);
         try
@@ -63,17 +108,15 @@ public class JsonExportInspectorSpecs
     }
 
     [Fact]
-    public async Task It_flags_a_reverse_ordered_export_as_not_chronological()
+    public async Task I_can_detect_a_reverse_ordered_export()
     {
-        var reversed = TwoMessages
-            .Replace("\"2021-07-19T13:34:18+00:00\"", "\"2021-07-24T13:49:13+00:00\"X")
-            .Replace("\"2021-07-24T13:49:13+00:00\"", "\"2021-07-19T13:34:18+00:00\"")
-            .Replace("\"2021-07-19T13:34:18+00:00\"X", "\"2021-07-24T13:49:13+00:00\"");
-        var path = await WriteTempAsync(reversed);
+        var path = await WriteTempAsync(ReverseOrdered);
         try
         {
             var info = await JsonExportInspector.InspectAsync(path);
             info.IsChronological.Should().BeFalse();
+            // The cutoff is still the last element in the array, regardless of order.
+            info.LastMessageId.Value.Should().Be(2000UL);
         }
         finally
         {
@@ -82,7 +125,38 @@ public class JsonExportInspectorSpecs
     }
 
     [Fact]
-    public async Task It_rejects_an_export_with_no_messages()
+    public async Task I_can_read_the_before_cutoff_when_the_date_range_has_one()
+    {
+        var path = await WriteTempAsync(WithBefore);
+        try
+        {
+            var info = await JsonExportInspector.InspectAsync(path);
+            info.Before.Should().NotBeNull();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_can_inspect_an_export_whose_messages_have_no_timestamp()
+    {
+        var path = await WriteTempAsync(NoTimestamps);
+        try
+        {
+            var info = await JsonExportInspector.InspectAsync(path);
+            info.IsChronological.Should().BeTrue();
+            info.LastMessageId.Value.Should().Be(2000UL);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_cannot_continue_an_export_with_no_messages()
     {
         var path = await WriteTempAsync(NoMessages);
         try
@@ -97,7 +171,7 @@ public class JsonExportInspectorSpecs
     }
 
     [Fact]
-    public async Task It_rejects_a_non_dce_json_file()
+    public async Task I_cannot_inspect_a_non_dce_json_file()
     {
         var path = await WriteTempAsync("""{ "hello": "world" }""");
         try
@@ -112,7 +186,7 @@ public class JsonExportInspectorSpecs
     }
 
     [Fact]
-    public async Task It_rejects_malformed_json()
+    public async Task I_cannot_inspect_malformed_json()
     {
         var path = await WriteTempAsync("{ not json");
         try
