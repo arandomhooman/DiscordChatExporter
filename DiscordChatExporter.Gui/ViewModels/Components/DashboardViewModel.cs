@@ -70,7 +70,13 @@ public partial class DashboardViewModel : ViewModelBase
             ),
             SelectedChannels.WatchProperty(
                 o => o.Count,
-                _ => ExportCommand.NotifyCanExecuteChanged()
+                _ =>
+                {
+                    ExportCommand.NotifyCanExecuteChanged();
+                    ContinueExportCommand.NotifyCanExecuteChanged();
+                    OnPropertyChanged(nameof(AllChannelsSelected));
+                    OnPropertyChanged(nameof(SelectAllChannelsButtonText));
+                }
             )
         );
     }
@@ -81,6 +87,7 @@ public partial class DashboardViewModel : ViewModelBase
     [NotifyCanExecuteChangedFor(nameof(PullChannelsCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(ContinueExportCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SelectAllChannelsCommand))]
     public partial bool IsBusy { get; set; }
 
     [ObservableProperty]
@@ -105,12 +112,34 @@ public partial class DashboardViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(PullChannelsCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ContinueExportCommand))]
     public partial Guild? SelectedGuild { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AllChannelsSelected))]
+    [NotifyPropertyChangedFor(nameof(SelectAllChannelsButtonText))]
+    [NotifyCanExecuteChangedFor(nameof(SelectAllChannelsCommand))]
     public partial IReadOnlyList<ChannelConnection>? AvailableChannels { get; set; }
 
     public ObservableCollection<ChannelConnection> SelectedChannels { get; } = [];
+
+    // True when every exportable (non-category) channel in the current guild is selected.
+    public bool AllChannelsSelected
+    {
+        get
+        {
+            if (AvailableChannels is null)
+                return false;
+
+            var exportableCount = FlattenExportableChannels(AvailableChannels).Count();
+            return exportableCount > 0 && SelectedChannels.Count >= exportableCount;
+        }
+    }
+
+    public string SelectAllChannelsButtonText =>
+        AllChannelsSelected
+            ? LocalizationManager.DeselectAllChannelsButton
+            : LocalizationManager.SelectAllChannelsButton;
 
     public override Task InitializeAsync()
     {
@@ -237,6 +266,48 @@ public partial class DashboardViewModel : ViewModelBase
         {
             progress.ReportCompletion();
             IsBusy = false;
+        }
+    }
+
+    // Walks the channel tree and yields every exportable (non-category) channel,
+    // including nested threads. Categories are not exportable and are skipped.
+    private static IEnumerable<ChannelConnection> FlattenExportableChannels(
+        IReadOnlyList<ChannelConnection> connections
+    )
+    {
+        foreach (var connection in connections)
+        {
+            if (!connection.Channel.IsCategory)
+                yield return connection;
+
+            if (connection.Children.Count > 0)
+            {
+                foreach (var child in FlattenExportableChannels(connection.Children))
+                    yield return child;
+            }
+        }
+    }
+
+    private bool CanSelectAllChannels() =>
+        !IsBusy
+        && AvailableChannels is not null
+        && FlattenExportableChannels(AvailableChannels).Any();
+
+    [RelayCommand(CanExecute = nameof(CanSelectAllChannels))]
+    private void SelectAllChannels()
+    {
+        if (AvailableChannels is null)
+            return;
+
+        // Capture the toggle state before mutating, since AllChannelsSelected
+        // is derived from SelectedChannels.Count and would flip after Clear().
+        var wasAllSelected = AllChannelsSelected;
+        SelectedChannels.Clear();
+
+        if (!wasAllSelected)
+        {
+            foreach (var connection in FlattenExportableChannels(AvailableChannels))
+                SelectedChannels.Add(connection);
         }
     }
 
@@ -426,7 +497,8 @@ public partial class DashboardViewModel : ViewModelBase
         }
     }
 
-    private bool CanContinueExport() => !IsBusy && _discord is not null;
+    private bool CanContinueExport() =>
+        !IsBusy && _discord is not null && SelectedGuild is not null && SelectedChannels.Any();
 
     [RelayCommand(CanExecute = nameof(CanContinueExport))]
     private async Task ContinueExportAsync()

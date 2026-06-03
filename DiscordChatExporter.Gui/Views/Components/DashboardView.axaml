@@ -147,7 +147,23 @@
 
                 <!--  Channels  -->
                 <Border Grid.Column="1">
-                    <TreeView
+                    <DockPanel>
+                        <!--  Select all / Deselect all toggle  -->
+                        <Border
+                            DockPanel.Dock="Top"
+                            BorderBrush="{DynamicResource MaterialDividerBrush}"
+                            BorderThickness="0,0,0,1">
+                            <Button
+                                Margin="8,4"
+                                Padding="8,4"
+                                HorizontalAlignment="Left"
+                                Command="{Binding SelectAllChannelsCommand}"
+                                Content="{Binding SelectAllChannelsButtonText}"
+                                FontSize="13"
+                                Theme="{DynamicResource MaterialFlatButton}"
+                                ToolTip.Tip="{Binding LocalizationManager.SelectAllChannelsButton}" />
+                        </Border>
+                        <TreeView
                         x:Name="AvailableChannelsTreeView"
                         ItemsSource="{Binding AvailableChannels}"
                         SelectedItems="{Binding SelectedChannels}"
@@ -220,6 +236,7 @@
                             </TreeDataTemplate>
                         </TreeView.ItemTemplate>
                     </TreeView>
+                    </DockPanel>
                 </Border>
             </Grid>
 

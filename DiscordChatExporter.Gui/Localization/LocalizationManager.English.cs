@@ -11,6 +11,8 @@ public partial class LocalizationManager
             [nameof(EtaEstimatingText)] = "estimating time remaining…",
             [nameof(EtaRemainingFormat)] = "~{0} left",
             [nameof(PullGuildsTooltip)] = "Pull available servers and channels (Enter)",
+            [nameof(SelectAllChannelsButton)] = "Select all",
+            [nameof(DeselectAllChannelsButton)] = "Deselect all",
             [nameof(ContinueExportTooltip)] =
                 "Continue an existing JSON, HTML, or CSV export (add new messages)",
             [nameof(ContinueExportUpToDateMessage)] = "That export is already up to date.",
