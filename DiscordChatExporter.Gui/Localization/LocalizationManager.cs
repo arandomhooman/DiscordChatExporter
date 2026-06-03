@@ -81,7 +81,6 @@ public partial class LocalizationManager
     public string ContinueExportReverseUnsupportedMessage => Get();
     public string ContinueExportPartitionedUnsupportedMessage => Get();
     public string ContinueExportFormatUnsupportedMessage => Get();
-    public string ContinueExportChannelUnknownMessage => Get();
     public string SettingsTooltip => Get();
     public string LastMessageSentTooltip => Get();
     public string TokenPlaceholderText => Get();

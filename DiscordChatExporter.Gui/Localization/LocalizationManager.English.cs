@@ -11,7 +11,8 @@ public partial class LocalizationManager
             [nameof(EtaEstimatingText)] = "estimating time remaining…",
             [nameof(EtaRemainingFormat)] = "~{0} left",
             [nameof(PullGuildsTooltip)] = "Pull available servers and channels (Enter)",
-            [nameof(ContinueExportTooltip)] = "Continue an existing JSON export (add new messages)",
+            [nameof(ContinueExportTooltip)] =
+                "Continue an existing JSON, HTML, or CSV export (add new messages)",
             [nameof(ContinueExportUpToDateMessage)] = "That export is already up to date.",
             [nameof(ContinueExportSuccessMessage)] = "Added {0} new message(s).",
             [nameof(ContinueExportReverseUnsupportedMessage)] =
@@ -20,8 +21,6 @@ public partial class LocalizationManager
                 "Continuing partitioned exports is not supported.",
             [nameof(ContinueExportFormatUnsupportedMessage)] =
                 "Continuing this file type is not supported (JSON, HTML, and CSV are).",
-            [nameof(ContinueExportChannelUnknownMessage)] =
-                "Could not determine the channel from the file. Keep the default file name or re-export.",
             [nameof(SettingsTooltip)] = "Settings",
             [nameof(LastMessageSentTooltip)] = "Last message sent:",
             [nameof(TokenPlaceholderText)] = "Token",

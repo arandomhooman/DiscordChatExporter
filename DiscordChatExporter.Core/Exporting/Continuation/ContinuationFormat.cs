@@ -60,12 +60,17 @@ public static class ContinuationFormat
                 cutoff,
                 cancellationToken
             ),
-            ".csv" => await CsvExportMerger.MergeAsync(
-                existingFilePath,
-                newMessagesFilePath,
-                cutoff,
-                cancellationToken
-            ),
+            // CsvExportMerger returns only the number of rows it appended (it has no count to
+            // recompute, unlike Json/Html). The dispatcher contract is "return the merged TOTAL",
+            // so add the existing data-row count back on to keep parity with the other formats and
+            // make the consumer's (total - ExistingCount) added-count come out right.
+            ".csv" => cutoff.ExistingCount
+                + await CsvExportMerger.MergeAsync(
+                    existingFilePath,
+                    newMessagesFilePath,
+                    cutoff,
+                    cancellationToken
+                ),
             var ext => throw new InvalidExportException(
                 $"Continuing {ext} exports is not supported."
             ),
