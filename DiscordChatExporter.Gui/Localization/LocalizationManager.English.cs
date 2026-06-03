@@ -8,6 +8,8 @@ public partial class LocalizationManager
         new Dictionary<string, string>
         {
             // Dashboard
+            [nameof(EtaEstimatingText)] = "estimating time remaining…",
+            [nameof(EtaRemainingFormat)] = "~{0} left",
             [nameof(PullGuildsTooltip)] = "Pull available servers and channels (Enter)",
             [nameof(ContinueExportTooltip)] = "Continue an existing JSON export (add new messages)",
             [nameof(ContinueExportUpToDateMessage)] = "That export is already up to date.",

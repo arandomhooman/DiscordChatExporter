@@ -38,6 +38,7 @@ public partial class DashboardViewModel : ViewModelBase
 
     private readonly IDisposable _eventSubscription;
     private readonly AutoResetProgressMuxer _progressMuxer;
+    private readonly EtaEstimator _etaEstimator = new();
 
     private DiscordClient? _discord;
 
@@ -60,7 +61,11 @@ public partial class DashboardViewModel : ViewModelBase
         _eventSubscription = Disposable.Merge(
             Progress.WatchProperty(
                 o => o.Current,
-                _ => OnPropertyChanged(nameof(IsProgressIndeterminate))
+                _ =>
+                {
+                    OnPropertyChanged(nameof(IsProgressIndeterminate));
+                    UpdateEta();
+                }
             ),
             SelectedChannels.WatchProperty(
                 o => o.Count,
@@ -76,6 +81,12 @@ public partial class DashboardViewModel : ViewModelBase
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(ContinueExportCommand))]
     public partial bool IsBusy { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasEta))]
+    public partial string? EtaText { get; set; }
+
+    public bool HasEta => !string.IsNullOrEmpty(EtaText);
 
     public LocalizationManager LocalizationManager { get; }
 
@@ -308,6 +319,7 @@ public partial class DashboardViewModel : ViewModelBase
     private async Task ExportAsync()
     {
         IsBusy = true;
+        _etaEstimator.Reset();
 
         try
         {
@@ -409,6 +421,7 @@ public partial class DashboardViewModel : ViewModelBase
         finally
         {
             IsBusy = false;
+            EtaText = null;
         }
     }
 
@@ -449,6 +462,7 @@ public partial class DashboardViewModel : ViewModelBase
         }
 
         IsBusy = true;
+        _etaEstimator.Reset();
         var progress = _progressMuxer.CreateInput();
         var tempPath = Path.Combine(
             Path.GetTempPath(),
@@ -542,6 +556,7 @@ public partial class DashboardViewModel : ViewModelBase
         {
             progress.ReportCompletion();
             IsBusy = false;
+            EtaText = null;
             try
             {
                 File.Delete(tempPath);
@@ -552,6 +567,26 @@ public partial class DashboardViewModel : ViewModelBase
             }
         }
     }
+
+    private void UpdateEta()
+    {
+        if (!IsBusy)
+        {
+            EtaText = null;
+            return;
+        }
+        _etaEstimator.Report(Progress.Current.Fraction, DateTimeOffset.Now);
+        var estimate = _etaEstimator.Estimate;
+        EtaText =
+            estimate is null ? LocalizationManager.EtaEstimatingText
+            : estimate.Value <= TimeSpan.Zero ? null
+            : string.Format(LocalizationManager.EtaRemainingFormat, FormatDuration(estimate.Value));
+    }
+
+    private static string FormatDuration(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours}h{t.Minutes:D2}m"
+        : t.TotalMinutes >= 1 ? $"{t.Minutes}m{t.Seconds:D2}s"
+        : $"{t.Seconds}s";
 
     private static bool IsPartitionedExportPath(string filePath)
     {

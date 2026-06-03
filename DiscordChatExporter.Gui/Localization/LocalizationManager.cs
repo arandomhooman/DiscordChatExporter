@@ -72,6 +72,8 @@ public partial class LocalizationManager
 {
     // ---- Dashboard ----
 
+    public string EtaEstimatingText => Get();
+    public string EtaRemainingFormat => Get();
     public string PullGuildsTooltip => Get();
     public string ContinueExportTooltip => Get();
     public string ContinueExportUpToDateMessage => Get();

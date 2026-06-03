@@ -77,6 +77,13 @@
                 Background="Transparent"
                 IsIndeterminate="{Binding IsProgressIndeterminate}"
                 Value="{Binding Progress.Current.Fraction, Mode=OneWay}" />
+            <TextBlock
+                Margin="12,0,12,4"
+                HorizontalAlignment="Right"
+                FontSize="11"
+                Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                IsVisible="{Binding HasEta}"
+                Text="{Binding EtaText}" />
         </StackPanel>
 
         <!--  Body  -->
