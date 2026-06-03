@@ -1,0 +1,99 @@
+using System;
+using System.IO;
+using System.Threading.Tasks;
+using DiscordChatExporter.Core.Exporting.Continuation;
+using FluentAssertions;
+using Xunit;
+
+namespace DiscordChatExporter.Cli.Tests.Specs.Continuation;
+
+public class CsvExportInspectorSpecs
+{
+    private static async Task<string> WriteAsync(string content, string name)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"{name} [222] - {Guid.NewGuid():N}.csv");
+        await File.WriteAllTextAsync(path, content);
+        return path;
+    }
+
+    private const string Header = "AuthorID,Author,Date,Content,Attachments,Reactions\r\n";
+
+    [Fact]
+    public async Task I_can_read_the_cutoff_count_and_order_from_a_csv_export()
+    {
+        var body =
+            "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"hi\",\"\",\"\"\r\n"
+            + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"bye, really\",\"\",\"\"\r\n";
+        var path = await WriteAsync(Header + body, "Guild - general");
+        try
+        {
+            var info = await CsvExportInspector.InspectAsync(path);
+            info.ChannelId.Value.Should().Be(222UL);
+            info.ExistingCount.Should().Be(2);
+            info.IsChronological.Should().BeTrue();
+            info.CutoffIsExact.Should().BeFalse();
+            info.Cutoff.ToDate()
+                .Should()
+                .BeCloseTo(
+                    new DateTimeOffset(2021, 07, 24, 13, 49, 13, TimeSpan.Zero),
+                    TimeSpan.FromSeconds(1)
+                );
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_can_parse_rows_whose_content_contains_commas_quotes_and_newlines()
+    {
+        var body =
+            "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"line1\nline2, with \"\"quote\"\"\",\"\",\"\"\r\n"
+            + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"ok\",\"\",\"\"\r\n";
+        var path = await WriteAsync(Header + body, "Guild - general");
+        try
+        {
+            var info = await CsvExportInspector.InspectAsync(path);
+            info.ExistingCount.Should().Be(2); // embedded newline did NOT create a phantom row
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_cannot_continue_a_csv_with_no_data_rows()
+    {
+        var path = await WriteAsync(Header, "Guild - general");
+        try
+        {
+            var act = async () => await CsvExportInspector.InspectAsync(path);
+            await act.Should().ThrowAsync<InvalidExportException>();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_cannot_continue_a_csv_whose_filename_lacks_a_channel_id()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"renamed-{Guid.NewGuid():N}.csv");
+        await File.WriteAllTextAsync(
+            path,
+            Header + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"x\",\"\",\"\"\r\n"
+        );
+        try
+        {
+            var act = async () => await CsvExportInspector.InspectAsync(path);
+            await act.Should().ThrowAsync<InvalidExportException>();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+}
