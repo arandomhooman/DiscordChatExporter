@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="AngleSharp" />
+    <PackageReference Include="WebMarkupMin.Core" />
     <PackageReference Include="coverlet.collector" PrivateAssets="all" />
     <PackageReference Include="CSharpier.MsBuild" PrivateAssets="all" />
     <PackageReference Include="FluentAssertions" />
