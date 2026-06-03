@@ -495,11 +495,11 @@ public partial class DashboardViewModel : ViewModelBase
             }
 
             // Merge the new messages into the original file
-            var addedBefore = info.MessageCount;
+            var countBefore = info.MessageCount;
             var total = await JsonExportMerger.MergeAsync(filePath, tempPath, DateTimeOffset.Now);
-            var added = total - addedBefore;
+            var newMessages = total - countBefore;
 
-            if (added <= 0)
+            if (newMessages <= 0)
             {
                 _snackbarManager.Notify(
                     LocalizationManager.ContinueExportUpToDateMessage.TrimEnd('.')
@@ -508,7 +508,7 @@ public partial class DashboardViewModel : ViewModelBase
             else
             {
                 _snackbarManager.Notify(
-                    string.Format(LocalizationManager.ContinueExportSuccessMessage, added)
+                    string.Format(LocalizationManager.ContinueExportSuccessMessage, newMessages)
                 );
             }
         }
