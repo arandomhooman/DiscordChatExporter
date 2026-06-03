@@ -110,26 +110,70 @@ JSON dispatch wraps the existing `JsonExportInspector`/`JsonExportMerger` (mappi
   whose `Date` ≤ cutoff timestamp**. No header rewrite needed (CSV has no footer/count). Write via
   temp + atomic `File.Replace` + `.bak` (same safety as JSON).
 
-**HTML** (`HtmlExportInspector` / `HtmlExportMerger`)
-- Output is minified (WebMarkupMin) — attribute quotes may be stripped. All parsing uses
-  quote-tolerant regex (`data-message-id="?(\d+)"?`).
-- Inspect: find all `data-message-id` values; first/last give order and the exact cutoff id;
-  `ExistingCount` = count of `chatlog__message-container-` occurrences (informational);
-  `ChannelId` from filename. `CutoffIsExact = true`.
-- Merge (marker-based splice):
-  1. In the existing file, locate the chatlog-closing `</div>` immediately preceding
-     `<div class="postamble">` (the postamble opens by closing the chatlog container).
-  2. From the temp export, extract the message-group HTML: the slice **between** the end of its
-     preamble (the chatlog container open) and the start of its postamble (the same
-     chatlog-closing `</div>` before `<div class="postamble">`).
-  3. Insert that slice at the splice point in the existing file.
-  4. Update the existing postamble's `Exported N message(s)` count to `N + M` (regex on the
-     `postamble__entry` text; the number is `n0`-formatted with the export culture — match digits +
-     grouping separators).
-  5. Write via temp + atomic `File.Replace` + `.bak`.
-- **Accepted cosmetic seam:** if the last existing message and the first new message are the same
-  author within 7 minutes, they render as two adjacent groups (a repeated author header) instead of
-  one merged group. Visual only; content is complete and correct.
+**HTML** (`HtmlExportInspector` / `HtmlExportMerger`) — hardened marker splice into one file.
+This section reflects a 5-agent design review; see "HTML merge — alternatives considered" below.
+
+*Verified minifier behavior* (`new HtmlMinifier()`, defaults, WebMarkupMin 2.21.0 — confirmed
+empirically): `RemoveHtmlComments = true` (the templates' `<!--wmm:ignore-->` directive comments
+are **stripped**, but the content they wrap is preserved verbatim — so do NOT anchor on comments);
+`AttributeQuotesRemovalMode = Html5` (quotes dropped on single-token values: `data-message-id=123`,
+`class=postamble`; kept on multi-token values like `class="a b"`); attributes are **not reordered**;
+`RemoveOptionalEndTags = true` (so `</body>`/`</html>` **may be absent** — never anchor on them).
+All regexes are quote-tolerant (e.g. `class="?postamble"?`, `data-message-id="?(\d+)"?`).
+
+- **Inspect:** scan `data-message-id="?(\d+)"?`; first/last give order + the **exact** cutoff id;
+  `ExistingCount` = id count; `ChannelId` from filename (HTML preamble has no channel id).
+  `CutoffIsExact = true`. Refuse reverse order (first id > last id).
+- **Merge (string splice, anchored on stable class tokens):**
+  1. Splice point in the existing file: find the `<div class="?postamble"?>` opener (use the **last**
+     occurrence), then the `</div>` immediately preceding it (the chatlog-container close). Insert
+     before that `</div>`. (`</div>` alone is not unique — always locate the postamble first.)
+  2. Extract new groups from the temp export: the slice between `<div class="chatlog">` (the
+     container open, preserved verbatim) and that same postamble-preceding `</div>`. This is exactly
+     the `chatlog__message-group` blocks — no preamble/theme CSS, no postamble.
+  3. **Dedupe** the temp slice against the existing file by `data-message-id` (drop any new message
+     whose id already appears — guards overlap/boundary).
+  4. Insert the deduped slice at the splice point.
+  5. **Recompute** the `Exported N message(s)` count = total `data-message-id` count in the merged
+     file, and rewrite the postamble count entry (anchor on the invariant English wrapper
+     `Exported …​ message(s)`, replace the inner number, formatted `n0` with the export culture).
+     Do **not** parse the old localized number (grouping separators include U+202F, U+066C). If the
+     entry can't be matched, leave it unchanged (cosmetic) rather than corrupt the file.
+  6. Write to a temp file; **validate before committing** (next bullet); then atomic `File.Replace`
+     + `.bak`.
+- **Validate-before-commit gate** (abort the replace, keep the original, on any failure): merged
+  contains exactly one `<div class="chatlog">` and exactly one `<div class="?postamble"?>`; the set
+  of `data-message-id`s = old ∪ new with **no duplicates** and in **ascending** order; merged length
+  > original length. (Atomic replace prevents corruption; this gate prevents a silently-wrong file.)
+- **Injection-safe:** message content is `HtmlEncode`d at render, so a user message containing
+  `<div class="postamble">` becomes `&lt;div…` and cannot forge the splice anchor.
+- **Optional producer hardening (future files):** during normal HTML export, emit a stable sentinel
+  at the chatlog-close boundary (a real element/attribute, or a comment registered via
+  `PreservableHtmlCommentList="^dce:"`, since default settings strip plain comments). New exports
+  then splice on an exact unique sentinel, immune to template/minifier drift. Legacy files (no
+  sentinel) use the `<div class="postamble">` token path above. This is a low-priority enhancement;
+  the token path is the universal mechanism and works without it.
+- **Accepted cosmetic seam:** if the last existing message and the first new message share an author
+  within 7 minutes, they render as two adjacent groups (a repeated author header) instead of one.
+  Visual only; all content + `data-message-id`s + anchor links are intact. (A perfect seam-merge is
+  not achievable anyway: grouping needs the old messages' precise timestamps, but rendered HTML
+  carries only minute-precision display strings.)
+- **Pre-implementation action (do not skip):** capture one **real** minified HTML export and confirm
+  the exact seam bytes (quote presence on `class="postamble"`, attribute order, whether `</body>`
+  survives) before finalizing the regexes. The shipped file contains no `wmm:ignore` comments.
+
+**HTML merge — alternatives considered and rejected** (5-agent review):
+- *Runtime DOM merge (AngleSharp):* AngleSharp is trim-viable (reflection-free `Configuration.Default`
+  + `TrimmerRootAssembly` escape hatch), but **rejected**: a full parse+serialize **rewrites every
+  byte of the growing file each continue** (re-quotes attributes / re-minifies differently than
+  WebMarkupMin) and **normalizes whitespace inside `white-space: pre-wrap` spans and multiline code
+  blocks → real content corruption**, with a memory curve that grows with the file an append feature
+  is meant to grow cheaply. Its only edge — merging the seam group — is only approximate anyway.
+- *Companion file (+ index):* simplest/safest, but **rejected**: `scrollToMessage` and reply/timestamp
+  anchors (`#chatlog__message-container-{id}`) resolve within a **single document**, so a reply in a
+  later file pointing at a message in an earlier file becomes a **dead link** — a functional
+  regression, not just "more files." (Noted: partitioned exports and `--media` already produce
+  sibling files, but those don't introduce cross-file *anchor* breakage.)
 
 ### GUI changes (Part A)
 `DashboardViewModel.ContinueExportAsync` is generalized:
@@ -152,10 +196,15 @@ Core unit tests (no network) with fixtures, per handler:
   `.bak` created.
 - `HtmlExportInspector`: extracts last `data-message-id` (quoted and unquoted/minified), order from
   first/last, channel id from filename.
-- `HtmlExportMerger`: splices new groups before the postamble, count updated to N+M, output still
-  contains exactly one `<div class="postamble">` and one `</body>`, all original + new
-  `data-message-id`s present in order. Most fixtures here (riskiest merge).
-- Dispatch: `.txt` → unsupported; unknown channel id → refusal.
+- `HtmlExportMerger` (most fixtures — riskiest merge): splices new groups before the postamble;
+  count recomputed to N+M from the merged `data-message-id` count; the validate gate passes only
+  when there's exactly one `<div class="chatlog">` + one postamble and all old∪new ids are present,
+  ascending, de-duplicated. Cases: normal append; **overlapping** ids deduped; **0-message** existing
+  export; single message / single group; quote-stripped (minified) input; non-English count culture
+  (de-DE / fr-FR U+202F / Arabic U+066C) — count still rewritten correctly; a deliberately malformed
+  merge result → gate **aborts**, original untouched. Fixtures derived from a **real captured minified
+  export** (per the pre-implementation action), not hand-written guesses.
+- Dispatch: `.txt` → unsupported; unknown channel id → refusal; reverse-ordered HTML → refused.
 
 ## Part B — Export ETA
 
