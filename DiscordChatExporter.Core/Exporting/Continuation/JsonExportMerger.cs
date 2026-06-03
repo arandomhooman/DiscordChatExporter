@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -27,23 +26,38 @@ public static class JsonExportMerger
         var tempPath = existingFilePath + ".merging.tmp";
         long total;
 
-        await using (var outStream = File.Create(tempPath))
+        try
         {
-            await using var writer = new Utf8JsonWriter(
-                outStream,
-                new JsonWriterOptions
-                {
-                    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                    Indented = true,
-                    SkipValidation = true,
-                }
-            );
+            await using (var outStream = File.Create(tempPath))
+            {
+                await using var writer = new Utf8JsonWriter(
+                    outStream,
+                    new JsonWriterOptions
+                    {
+                        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                        Indented = true,
+                        SkipValidation = true,
+                    }
+                );
 
-            total = Merge(existingBytes, newBytes, exportedAt, writer);
-            await writer.FlushAsync(cancellationToken);
+                total = Merge(existingBytes, newBytes, exportedAt, writer);
+                await writer.FlushAsync(cancellationToken);
+            }
+
+            File.Replace(tempPath, existingFilePath, existingFilePath + ".bak");
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(tempPath);
+            }
+            catch
+            { /* best-effort temp cleanup */
+            }
+            throw;
         }
 
-        File.Replace(tempPath, existingFilePath, existingFilePath + ".bak");
         return total;
     }
 
@@ -68,14 +82,9 @@ public static class JsonExportMerger
             switch (name)
             {
                 case "exportedAt":
-                    writer.WriteString(
-                        "exportedAt",
-                        exportedAt.ToString(
-                            "yyyy-MM-ddTHH:mm:ss.fffzzz",
-                            CultureInfo.InvariantCulture
-                        )
-                    );
-                    break; // value scalar already consumed positionally
+                    writer.WriteString("exportedAt", exportedAt);
+                    // Discard the original timestamp token; we write a fresh exportedAt above.
+                    break;
 
                 case "messageCount":
                     break; // drop; recomputed below

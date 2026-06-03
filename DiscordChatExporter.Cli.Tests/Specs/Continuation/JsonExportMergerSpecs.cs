@@ -23,8 +23,6 @@ public class JsonExportMergerSpecs
             }
             """;
 
-    private static string NewExport(string messages, int count) => Existing(messages, count);
-
     private const string MsgA =
         """{ "id": "1000", "type": "Default", "timestamp": "2021-07-19T13:34:18+00:00", "content": "a" }""";
     private const string MsgB =
@@ -58,7 +56,7 @@ public class JsonExportMergerSpecs
     public async Task It_appends_new_messages_and_fixes_the_count()
     {
         var existing = await WriteAsync(Existing($"{MsgA},{MsgB}", 2));
-        var fresh = await WriteAsync(NewExport(MsgC, 1));
+        var fresh = await WriteAsync(Existing(MsgC, 1));
         try
         {
             var total = await JsonExportMerger.MergeAsync(
@@ -95,7 +93,7 @@ public class JsonExportMergerSpecs
     public async Task It_appends_into_an_export_that_had_no_messages()
     {
         var existing = await WriteAsync(Existing("", 0));
-        var fresh = await WriteAsync(NewExport($"{MsgA},{MsgB}", 2));
+        var fresh = await WriteAsync(Existing($"{MsgA},{MsgB}", 2));
         try
         {
             var total = await JsonExportMerger.MergeAsync(existing, fresh, DateTimeOffset.UtcNow);
@@ -118,7 +116,7 @@ public class JsonExportMergerSpecs
     public async Task It_produces_valid_json_whose_count_matches_actual_elements()
     {
         var existing = await WriteAsync(Existing(MsgA, 1));
-        var fresh = await WriteAsync(NewExport($"{MsgB},{MsgC}", 2));
+        var fresh = await WriteAsync(Existing($"{MsgB},{MsgC}", 2));
         try
         {
             await JsonExportMerger.MergeAsync(existing, fresh, DateTimeOffset.UtcNow);
@@ -141,7 +139,7 @@ public class JsonExportMergerSpecs
         // Existing has a nested message; fresh adds another nested message. This guards the
         // depth-tracking CopyValue token-pump against nested objects and arrays.
         var existing = await WriteAsync(Existing(MsgNested, 1));
-        var fresh = await WriteAsync(NewExport(MsgNested.Replace("\"4000\"", "\"5000\""), 1));
+        var fresh = await WriteAsync(Existing(MsgNested.Replace("\"4000\"", "\"5000\""), 1));
         try
         {
             var total = await JsonExportMerger.MergeAsync(existing, fresh, DateTimeOffset.UtcNow);
