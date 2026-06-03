@@ -420,12 +420,24 @@ public partial class DashboardViewModel : ViewModelBase
         if (_discord is null)
             return;
 
-        // Pick the existing JSON export
+        // Pick the existing export (JSON, HTML, or CSV)
         var filePath = await _dialogManager.PromptSingleFilePathAsync([
-            new FilePickerFileType("JSON export") { Patterns = ["*.json"] },
+            new FilePickerFileType("Supported exports (JSON, HTML, CSV)")
+            {
+                Patterns = ["*.json", "*.html", "*.htm", "*.csv"],
+            },
         ]);
         if (string.IsNullOrWhiteSpace(filePath))
             return;
+
+        // Refuse unsupported file types
+        if (!ContinuationFormat.IsSupportedExtension(filePath))
+        {
+            _snackbarManager.Notify(
+                LocalizationManager.ContinueExportFormatUnsupportedMessage.TrimEnd('.')
+            );
+            return;
+        }
 
         // Refuse partitioned exports (name- or sibling-based detection)
         if (IsPartitionedExportPath(filePath))
@@ -440,14 +452,14 @@ public partial class DashboardViewModel : ViewModelBase
         var progress = _progressMuxer.CreateInput();
         var tempPath = Path.Combine(
             Path.GetTempPath(),
-            $"{Program.Name}-continue-{Guid.NewGuid():N}.json"
+            $"{Program.Name}-continue-{Guid.NewGuid():N}{Path.GetExtension(filePath)}"
         );
 
         try
         {
-            var info = await JsonExportInspector.InspectAsync(filePath);
+            var cutoff = await ContinuationFormat.ReadCutoffAsync(filePath);
 
-            if (!info.IsChronological)
+            if (!cutoff.IsChronological)
             {
                 _snackbarManager.Notify(
                     LocalizationManager.ContinueExportReverseUnsupportedMessage.TrimEnd('.')
@@ -455,21 +467,19 @@ public partial class DashboardViewModel : ViewModelBase
                 return;
             }
 
-            // Resolve live channel + guild
-            var channel = await _discord.GetChannelAsync(info.ChannelId);
+            var channel = await _discord.GetChannelAsync(cutoff.ChannelId);
             var guild = channel.IsDirect
                 ? Guild.DirectMessages
                 : await _discord.GetGuildAsync(channel.GuildId);
 
-            // Export only messages after the recorded cutoff into a temp file
             var request = new ExportRequest(
                 guild,
                 channel,
                 tempPath,
                 null,
-                ExportFormat.Json,
-                info.LastMessageId, // exact, exclusive cursor
-                info.Before,
+                ContinuationFormat.FormatFor(filePath),
+                cutoff.Cutoff,
+                cutoff.Before,
                 PartitionLimit.Null,
                 MessageFilter.Null,
                 false,
@@ -494,9 +504,13 @@ public partial class DashboardViewModel : ViewModelBase
                 return;
             }
 
-            // Merge the new messages into the original file
-            var countBefore = info.MessageCount;
-            var total = await JsonExportMerger.MergeAsync(filePath, tempPath, DateTimeOffset.Now);
+            var countBefore = cutoff.ExistingCount;
+            var total = await ContinuationFormat.MergeAsync(
+                filePath,
+                tempPath,
+                cutoff,
+                DateTimeOffset.Now
+            );
             var newMessages = total - countBefore;
 
             if (newMessages <= 0)

@@ -16,6 +16,10 @@ public partial class LocalizationManager
                 "Continuing reverse-ordered exports is not supported.",
             [nameof(ContinueExportPartitionedUnsupportedMessage)] =
                 "Continuing partitioned exports is not supported.",
+            [nameof(ContinueExportFormatUnsupportedMessage)] =
+                "Continuing this file type is not supported (JSON, HTML, and CSV are).",
+            [nameof(ContinueExportChannelUnknownMessage)] =
+                "Could not determine the channel from the file. Keep the default file name or re-export.",
             [nameof(SettingsTooltip)] = "Settings",
             [nameof(LastMessageSentTooltip)] = "Last message sent:",
             [nameof(TokenPlaceholderText)] = "Token",
