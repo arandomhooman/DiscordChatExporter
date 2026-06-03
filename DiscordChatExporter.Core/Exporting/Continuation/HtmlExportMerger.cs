@@ -25,9 +25,19 @@ public static partial class HtmlExportMerger
     [GeneratedRegex("(Exported )(.+?)( message\\(s\\))")]
     private static partial Regex CountRegex();
 
+    // Matches the opening of a message container's class attribute, tolerating both the unquoted
+    // single-token normal case (class=chatlog__message-container) and the QUOTED multi-token pinned
+    // case (class="chatlog__message-container chatlog__message-container--pinned" — multi-token
+    // values keep their quotes through the minifier). The literal "class=" prefix means it never
+    // false-matches id="chatlog__message-container-N" or href="#chatlog__message-container-N", and
+    // the "--pinned" token (not preceded by class=) yields no second match within a container.
+    [GeneratedRegex("class=\"?chatlog__message-container")]
+    private static partial Regex ContainerMarkerRegex();
+
     public static async ValueTask<long> MergeAsync(
         string existingFilePath,
         string newMessagesFilePath,
+        // unused here (HTML dedupes by id); kept for ContinuationFormat dispatcher signature parity
         ContinuationCutoff cutoff,
         CancellationToken cancellationToken = default
     )
@@ -185,17 +195,16 @@ public static partial class HtmlExportMerger
 
     private static int FindFirstContainerStart(string group)
     {
-        var marker = group.IndexOf("class=chatlog__message-container", StringComparison.Ordinal);
-        if (marker < 0)
+        var marker = ContainerMarkerRegex().Match(group);
+        if (!marker.Success)
             return -1;
-        var divStart = group.LastIndexOf("<div", marker, StringComparison.Ordinal);
+        var divStart = group.LastIndexOf("<div", marker.Index, StringComparison.Ordinal);
         return divStart;
     }
 
     private static IEnumerable<string> SplitByContainerMarker(string containerRegion)
     {
-        const string marker = "class=chatlog__message-container";
-        var starts = MarkerDivStarts(containerRegion, marker);
+        var starts = ContainerMarkerDivStarts(containerRegion);
         if (starts.Count == 0)
         {
             yield return containerRegion;
@@ -207,6 +216,20 @@ public static partial class HtmlExportMerger
             var end = k + 1 < starts.Count ? starts[k + 1] : containerRegion.Length;
             yield return containerRegion[start..end];
         }
+    }
+
+    // Quote-tolerant container-start locator (see ContainerMarkerRegex). For each class-attr match,
+    // back up to the owning "<div".
+    private static List<int> ContainerMarkerDivStarts(string text)
+    {
+        var starts = new List<int>();
+        foreach (Match m in ContainerMarkerRegex().Matches(text))
+        {
+            var divStart = text.LastIndexOf("<div", m.Index, StringComparison.Ordinal);
+            if (divStart >= 0)
+                starts.Add(divStart);
+        }
+        return starts;
     }
 
     private static IEnumerable<string> SplitMessageGroups(string slice)
@@ -226,10 +249,10 @@ public static partial class HtmlExportMerger
         }
     }
 
-    // For every occurrence of `marker`, return the index of the "<div" that owns it. The container
-    // marker is a substring of the group marker only if the class names overlapped — they don't
-    // ("chatlog__message-group" vs "chatlog__message-container" diverge after "message-") — so the
-    // two never cross-match.
+    // For every literal occurrence of `marker`, return the index of the "<div" that owns it. Used
+    // only for the group marker (class=chatlog__message-group), which the template always emits
+    // clean/unquoted — containers use the quote-tolerant ContainerMarkerDivStarts instead. The group
+    // and container class names diverge after "message-", so the two markers never cross-match.
     private static List<int> MarkerDivStarts(string text, string marker)
     {
         var starts = new List<int>();
@@ -246,13 +269,31 @@ public static partial class HtmlExportMerger
         return starts;
     }
 
-    // The merged file has exactly one "Exported N message(s)" (in the postamble); the non-greedy
-    // pattern matches it first. Rewrite the recomputed total in the same "n0" form the renderer used.
+    // Locate the count match ("Exported N message(s)") within the POSTAMBLE only. Message content
+    // is HTML-escaped but the digits/words of that phrase survive verbatim, so a user message can
+    // contain the exact phrase earlier in the file — scanning the whole document and taking the
+    // first match would rewrite the user's text and leave the real count stale (silent corruption).
+    // Anchoring the scan at the postamble open (the postamble is the last block and the phrase's
+    // only legitimate home) makes the first match the real one. Returns null if not found.
+    private static Match? FindCountInPostamble(string html)
+    {
+        var post = PostambleOpenRegex().Match(html);
+        if (!post.Success)
+            return null;
+        var match = CountRegex().Match(html, post.Index);
+        return match.Success ? match : null;
+    }
+
+    // Rewrite the recomputed total into the postamble count, in the same "n0" form the renderer
+    // used. The count is a validated invariant (see Validate), not cosmetic: a real export always
+    // carries it, so its absence means the input isn't a recognizable export and we abort.
     private static string RewriteCount(string html, long total)
     {
-        var match = CountRegex().Match(html);
-        if (!match.Success)
-            return html; // leave unchanged rather than corrupt (cosmetic)
+        var match =
+            FindCountInPostamble(html)
+            ?? throw new InvalidExportException(
+                "Could not locate the message count in the HTML export's postamble."
+            );
         var replacement = match.Groups[1].Value + total.ToString("n0") + match.Groups[3].Value;
         return html[..match.Index] + replacement + html[(match.Index + match.Length)..];
     }
@@ -285,5 +326,22 @@ public static partial class HtmlExportMerger
         for (var i = 1; i < ids.Length; i++)
             if (ids[i] < ids[i - 1])
                 throw new InvalidExportException("HTML merge produced out-of-order message ids.");
+
+        // Count-consistency: the postamble's DISPLAYED count must equal the actual id count. Rather
+        // than parse the displayed digits (culture/grouping-separator hazard), we round-trip the
+        // expected value through the same "n0" formatting RewriteCount used and string-compare — so
+        // this is exact by construction. This catches a count that was written to the wrong place
+        // (e.g. into message content) or never updated. A no-op merge still passes (count unchanged).
+        var countMatch =
+            FindCountInPostamble(merged)
+            ?? throw new InvalidExportException(
+                "HTML merge produced a file with no message count in the postamble."
+            );
+        var displayed = countMatch.Groups[2].Value;
+        var expected = ((long)ids.Length).ToString("n0");
+        if (displayed != expected)
+            throw new InvalidExportException(
+                $"HTML merge produced an inconsistent message count (postamble shows '{displayed}', expected '{expected}')."
+            );
     }
 }
