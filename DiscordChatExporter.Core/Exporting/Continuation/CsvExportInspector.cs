@@ -65,7 +65,7 @@ public static class CsvExportInspector
         if (lastDate is null)
             throw new InvalidExportException("The CSV export has no parseable message dates.");
 
-        var isChronological = firstDate is null || firstDate <= lastDate;
+        var isChronological = firstDate <= lastDate;
         return new ContinuationCutoff(
             channelId,
             Snowflake.FromDate(lastDate.Value),
