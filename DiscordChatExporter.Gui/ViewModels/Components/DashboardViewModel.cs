@@ -62,10 +62,11 @@ public partial class DashboardViewModel : ViewModelBase
             Progress.WatchProperty(
                 o => o.Current,
                 _ =>
-                {
-                    OnPropertyChanged(nameof(IsProgressIndeterminate));
-                    UpdateEta();
-                }
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        OnPropertyChanged(nameof(IsProgressIndeterminate));
+                        UpdateEta();
+                    })
             ),
             SelectedChannels.WatchProperty(
                 o => o.Count,
