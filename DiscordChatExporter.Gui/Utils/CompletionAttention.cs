@@ -9,7 +9,7 @@ namespace DiscordChatExporter.Gui.Utils;
 
 // Best-effort "export finished" attention cue. On Windows, flashes the taskbar button when the
 // main window isn't focused; no-op everywhere else. No dependency, works for a portable exe.
-internal static partial class CompletionAttention
+internal static class CompletionAttention
 {
     public static void FlashIfUnfocused()
     {
@@ -31,7 +31,7 @@ internal static partial class CompletionAttention
 
         try
         {
-            NativeMethods.FlashTaskbar(handle.Value);
+            FlashTaskbar(handle.Value);
         }
         catch
         {
@@ -40,38 +40,17 @@ internal static partial class CompletionAttention
     }
 
     [SupportedOSPlatform("windows")]
-    private static partial class NativeMethods
+    private static void FlashTaskbar(IntPtr hwnd)
     {
-        // https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-flashwinfo
-        private const uint FLASHW_TRAY = 0x00000002; // flash the taskbar button
-        private const uint FLASHW_TIMERNOFG = 0x0000000C; // flash until the window comes to the foreground
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct FLASHWINFO
+        var info = new NativeMethods.Windows.FLASHWINFO
         {
-            public uint cbSize;
-            public IntPtr hwnd;
-            public uint dwFlags;
-            public uint uCount;
-            public uint dwTimeout;
-        }
+            cbSize = (uint)Marshal.SizeOf<NativeMethods.Windows.FLASHWINFO>(),
+            hwnd = hwnd,
+            dwFlags = NativeMethods.Windows.FLASHW_TRAY | NativeMethods.Windows.FLASHW_TIMERNOFG,
+            uCount = uint.MaxValue,
+            dwTimeout = 0,
+        };
 
-        [LibraryImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static partial bool FlashWindowEx(ref FLASHWINFO pwfi);
-
-        public static void FlashTaskbar(IntPtr hwnd)
-        {
-            var info = new FLASHWINFO
-            {
-                cbSize = (uint)Marshal.SizeOf<FLASHWINFO>(),
-                hwnd = hwnd,
-                dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG,
-                uCount = uint.MaxValue,
-                dwTimeout = 0,
-            };
-
-            FlashWindowEx(ref info);
-        }
+        NativeMethods.Windows.FlashWindowEx(ref info);
     }
 }
