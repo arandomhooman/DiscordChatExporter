@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
 
 namespace DiscordChatExporter.Core.Exporting;
@@ -11,7 +14,13 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
     private int _partitionIndex;
     private MessageWriter? _writer;
 
+    private readonly List<MutableFileStats> _files = [];
+    private MutableFileStats? _currentFile;
+
     public long MessagesExported { get; private set; }
+
+    // Per-file stats captured during the export, in creation order.
+    public IReadOnlyList<ExportedFile> Files => _files.Select(f => f.ToExportedFile()).ToArray();
 
     private async ValueTask<MessageWriter> InitializeWriterAsync(
         CancellationToken cancellationToken = default
@@ -40,6 +49,9 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
         var writer = CreateMessageWriter(filePath, context.Request.Format, context);
         await writer.WritePreambleAsync(cancellationToken);
 
+        _currentFile = new MutableFileStats(filePath);
+        _files.Add(_currentFile);
+
         return _writer = writer;
     }
 
@@ -67,6 +79,7 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
     {
         var writer = await InitializeWriterAsync(cancellationToken);
         await writer.WriteMessageAsync(message, cancellationToken);
+        _currentFile!.Record(message);
         MessagesExported++;
     }
 
@@ -77,6 +90,31 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
             _ = await InitializeWriterAsync();
 
         await UninitializeWriterAsync();
+    }
+
+    private sealed class MutableFileStats(string filePath)
+    {
+        private long _count;
+        private Snowflake? _firstId;
+        private DateTimeOffset? _firstTs;
+        private Snowflake? _lastId;
+        private DateTimeOffset? _lastTs;
+
+        public void Record(Message message)
+        {
+            if (_count == 0)
+            {
+                _firstId = message.Id;
+                _firstTs = message.Timestamp;
+            }
+
+            _lastId = message.Id;
+            _lastTs = message.Timestamp;
+            _count++;
+        }
+
+        public ExportedFile ToExportedFile() =>
+            new(filePath, _count, _firstId, _firstTs, _lastId, _lastTs);
     }
 }
 
