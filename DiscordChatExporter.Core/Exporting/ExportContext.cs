@@ -28,6 +28,8 @@ internal class ExportContext(DiscordClient discord, ExportRequest request)
 
     public ExportRequest Request { get; } = request;
 
+    public int DownloadedAssetCount => _assetDownloader.DownloadedAssetCount;
+
     public DateTimeOffset NormalizeDate(DateTimeOffset instant) =>
         Request.IsUtcNormalizationEnabled ? instant.ToUniversalTime() : instant.ToLocalTime();
 

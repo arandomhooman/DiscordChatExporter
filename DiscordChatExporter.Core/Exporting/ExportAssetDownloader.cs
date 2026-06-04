@@ -19,6 +19,10 @@ internal partial class ExportAssetDownloader(string workingDirPath, bool reuse)
     // File paths of the previously downloaded assets
     private readonly Dictionary<string, string> _previousPathsByUrl = new(StringComparer.Ordinal);
 
+    // Number of distinct asset URLs resolved during this export (downloaded or reused).
+    // Best-effort metric for the export manifest.
+    public int DownloadedAssetCount => _previousPathsByUrl.Count;
+
     public async ValueTask<string> DownloadAsync(
         string url,
         CancellationToken cancellationToken = default
