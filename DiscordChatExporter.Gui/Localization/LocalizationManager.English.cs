@@ -15,6 +15,15 @@ public partial class LocalizationManager
             [nameof(ExportSummaryMessage)] =
                 "Exported {0} channel(s) · {1} message(s) · {2} asset(s) · {3} · {4}",
             [nameof(ExportSummaryFailedSuffix)] = " · {0} failed",
+            [nameof(ResumePromptTitle)] = "Resume export?",
+            [nameof(ResumePromptMessage)] =
+                "{0} of the selected channels are already exported in this folder. Skip them and export only the rest?",
+            [nameof(ResumeSkipButton)] = "SKIP DONE",
+            [nameof(ResumeExportAllButton)] = "EXPORT ALL",
+            [nameof(ResumeAllUpToDateMessage)] =
+                "All selected channels are already exported in this folder.",
+            [nameof(ResumeSkippedMessage)] = "Skipped {0} already-exported channel(s).",
+            [nameof(RetryFailedTooltip)] = "Retry the channels that failed in the last export",
             [nameof(PullGuildsTooltip)] = "Pull available servers and channels (Enter)",
             [nameof(SelectAllChannelsButton)] = "Select all",
             [nameof(DeselectAllChannelsButton)] = "Deselect all",

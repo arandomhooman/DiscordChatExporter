@@ -48,6 +48,9 @@ public partial class DashboardViewModel : ViewModelBase
 
     private DiscordClient? _discord;
 
+    private ExportSetupViewModel? _lastExportSetup;
+    private IReadOnlyList<Channel> _lastFailedChannels = [];
+
     public DashboardViewModel(
         ViewModelManager viewModelManager,
         DialogManager dialogManager,
@@ -420,182 +423,215 @@ public partial class DashboardViewModel : ViewModelBase
                 return;
             }
 
-            var manifestData =
-                new ConcurrentBag<(string Dir, ManifestChannelInfo Info, ExportResult Result)>();
+            var channels = dialog.Channels!.ToArray();
+            var failed = await RunExportCoreAsync(exporter, dialog, channels);
 
-            var exportStats = new ConcurrentBag<ChannelExportStats>();
-            var failedExportCount = 0;
-            var stopwatch = Stopwatch.StartNew();
-
-            var channelProgressPairs = dialog
-                .Channels!.Select(c => new { Channel = c, Progress = _progressMuxer.CreateInput() })
-                .ToArray();
-
-            var successfulExportCount = 0;
-
-            await Parallel.ForEachAsync(
-                channelProgressPairs,
-                new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = Math.Max(1, _settingsService.ParallelLimit),
-                },
-                async (pair, cancellationToken) =>
-                {
-                    var channel = pair.Channel;
-                    var progress = pair.Progress;
-
-                    static ManifestChannelInfo BuildInfo(ExportRequest r) =>
-                        new(
-                            r.Guild.Id.ToString(),
-                            r.Guild.Name,
-                            r.Channel.Id.ToString(),
-                            r.Channel.Name,
-                            r.Channel.Parent?.Name,
-                            r.Format.ToString()
-                        );
-
-                    // Built outside the try so the ChannelEmptyException handler can still
-                    // catalog the empty output file (construction is pure path-building).
-                    var request = new ExportRequest(
-                        dialog.Guild!,
-                        channel,
-                        dialog.OutputPath!,
-                        dialog.AssetsDirPath,
-                        dialog.SelectedFormat,
-                        dialog.After?.Pipe(Snowflake.FromDate),
-                        dialog.Before?.Pipe(Snowflake.FromDate),
-                        dialog.PartitionLimit,
-                        dialog.MessageFilter,
-                        dialog.IsReverseMessageOrder,
-                        dialog.ShouldFormatMarkdown,
-                        dialog.ShouldDownloadAssets,
-                        dialog.ShouldReuseAssets,
-                        _settingsService.Locale,
-                        _settingsService.IsUtcNormalizationEnabled
-                    );
-
-                    try
-                    {
-                        var result = await exporter.ExportChannelAsync(
-                            request,
-                            progress,
-                            cancellationToken
-                        );
-
-                        manifestData.Add((request.OutputDirPath, BuildInfo(request), result));
-
-                        exportStats.Add(
-                            new ChannelExportStats(
-                                result.MessageCount,
-                                result.AssetCount,
-                                SumFileSizes(result.Files)
-                            )
-                        );
-
-                        Interlocked.Increment(ref successfulExportCount);
-                    }
-                    catch (ChannelEmptyException ex)
-                    {
-                        _snackbarManager.Notify(ex.Message.TrimEnd('.'));
-
-                        // Empty channels still produce an (empty) output file via exporter
-                        // disposal; catalog it for consistency with the filtered-to-empty case.
-                        manifestData.Add(
-                            (
-                                request.OutputDirPath,
-                                BuildInfo(request),
-                                new ExportResult(
-                                    [
-                                        new ExportedFile(
-                                            request.OutputFilePath,
-                                            0,
-                                            null,
-                                            null,
-                                            null,
-                                            null
-                                        ),
-                                    ],
-                                    0,
-                                    0
-                                )
-                            )
-                        );
-                    }
-                    catch (DiscordChatExporterException ex) when (!ex.IsFatal)
-                    {
-                        Interlocked.Increment(ref failedExportCount);
-                        _snackbarManager.Notify(ex.Message.TrimEnd('.'));
-                    }
-                    finally
-                    {
-                        progress.ReportCompletion();
-                    }
-                }
-            );
-
-            // Write/update the export catalog (best-effort: never fail the export over it).
-            // Each output directory is guarded independently so one bad directory neither
-            // aborts the others nor spams the same failure notification.
-            if (!manifestData.IsEmpty)
-            {
-                var now = DateTimeOffset.Now;
-                var catalogFailed = false;
-
-                foreach (var group in manifestData.GroupBy(d => d.Dir))
-                {
-                    try
-                    {
-                        var entries = group
-                            .SelectMany(d => ManifestBuilder.Build(d.Info, d.Result, now))
-                            .ToArray();
-
-                        await ManifestWriter.WriteAsync(group.Key, entries, now);
-                    }
-                    catch (Exception ex)
-                        when (ex is IOException or UnauthorizedAccessException or JsonException)
-                    {
-                        catalogFailed = true;
-                    }
-                }
-
-                if (catalogFailed)
-                {
-                    _snackbarManager.Notify(
-                        LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.')
-                    );
-                }
-            }
-
-            // Notify of the overall completion with a summary
-            stopwatch.Stop();
-            if (successfulExportCount > 0)
-            {
-                var summary = ExportSummarizer.Summarize(
-                    exportStats.ToArray(),
-                    failedExportCount,
-                    stopwatch.Elapsed
-                );
-
-                _snackbarManager.Notify(FormatExportSummary(summary));
-            }
-
-            // Flash the taskbar if the user isn't watching (best-effort, Windows only)
-            CompletionAttention.FlashIfUnfocused();
+            _lastExportSetup = dialog;
+            _lastFailedChannels = failed;
+            OnPropertyChanged(nameof(HasFailedExport));
+            RetryFailedExportCommand.NotifyCanExecuteChanged();
         }
         catch (Exception ex)
         {
-            var dialog = _viewModelManager.GetMessageBoxViewModel(
+            var messageBox = _viewModelManager.GetMessageBoxViewModel(
                 LocalizationManager.ErrorExportingTitle,
                 ex.ToString()
             );
 
-            await _dialogManager.ShowDialogAsync(dialog);
+            await _dialogManager.ShowDialogAsync(messageBox);
         }
         finally
         {
             IsBusy = false;
             EtaText = null;
         }
+    }
+
+    // Builds an ExportRequest for a channel using the dialog's parameters. Pure path-building.
+    private ExportRequest BuildExportRequest(ExportSetupViewModel dialog, Channel channel) =>
+        new(
+            dialog.Guild!,
+            channel,
+            dialog.OutputPath!,
+            dialog.AssetsDirPath,
+            dialog.SelectedFormat,
+            dialog.After?.Pipe(Snowflake.FromDate),
+            dialog.Before?.Pipe(Snowflake.FromDate),
+            dialog.PartitionLimit,
+            dialog.MessageFilter,
+            dialog.IsReverseMessageOrder,
+            dialog.ShouldFormatMarkdown,
+            dialog.ShouldDownloadAssets,
+            dialog.ShouldReuseAssets,
+            _settingsService.Locale,
+            _settingsService.IsUtcNormalizationEnabled
+        );
+
+    private static ManifestChannelInfo BuildManifestInfo(ExportRequest r) =>
+        new(
+            r.Guild.Id.ToString(),
+            r.Guild.Name,
+            r.Channel.Id.ToString(),
+            r.Channel.Name,
+            r.Channel.Parent?.Name,
+            r.Format.ToString()
+        );
+
+    // Best-effort per-channel manifest checkpoint. Failure must never fail the channel's export.
+    private async ValueTask CheckpointManifestAsync(ExportRequest request, ExportResult result)
+    {
+        try
+        {
+            var entries = ManifestBuilder.Build(BuildManifestInfo(request), result, DateTimeOffset.Now);
+            await ManifestWriter.WriteAsync(request.OutputDirPath, entries, DateTimeOffset.Now);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _snackbarManager.Notify(LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.'));
+        }
+    }
+
+    // The export core, shared by ExportAsync and the retry command. Returns the channels that failed.
+    private async Task<IReadOnlyList<Channel>> RunExportCoreAsync(
+        ChannelExporter exporter,
+        ExportSetupViewModel dialog,
+        IReadOnlyList<Channel> channels
+    )
+    {
+        var requests = channels
+            .Select(c => (Channel: c, Request: BuildExportRequest(dialog, c)))
+            .ToArray();
+
+        // Resume detection: which selected channels are already exported in their target directory?
+        var manifestsByDir = new Dictionary<string, ExportManifest?>(StringComparer.OrdinalIgnoreCase);
+        var alreadyDone = new List<(Channel Channel, ExportRequest Request)>();
+
+        foreach (var r in requests)
+        {
+            var dir = r.Request.OutputDirPath;
+            if (!manifestsByDir.TryGetValue(dir, out var manifest))
+            {
+                manifest = await ManifestReader.TryReadAsync(
+                    Path.Combine(dir, ExportManifest.FileName)
+                );
+                manifestsByDir[dir] = manifest;
+            }
+
+            if (
+                ManifestResume
+                    .AlreadyExported(manifest, [Path.GetFileName(r.Request.OutputFilePath)])
+                    .Count > 0
+            )
+            {
+                alreadyDone.Add(r);
+            }
+        }
+
+        var toExport = requests;
+
+        if (alreadyDone.Count == requests.Length)
+        {
+            // Everything is already exported here — nothing to do.
+            _snackbarManager.Notify(LocalizationManager.ResumeAllUpToDateMessage.TrimEnd('.'));
+            return [];
+        }
+
+        if (alreadyDone.Count > 0)
+        {
+            var prompt = _viewModelManager.GetMessageBoxViewModel(
+                LocalizationManager.ResumePromptTitle,
+                string.Format(LocalizationManager.ResumePromptMessage, alreadyDone.Count),
+                LocalizationManager.ResumeSkipButton, // default -> true -> skip (resume)
+                LocalizationManager.ResumeExportAllButton // cancel -> false/null -> export all
+            );
+
+            if (await _dialogManager.ShowDialogAsync(prompt) == true)
+            {
+                var doneSet = alreadyDone.Select(d => d.Channel).ToHashSet();
+                toExport = requests.Where(r => !doneSet.Contains(r.Channel)).ToArray();
+                _snackbarManager.Notify(
+                    string.Format(LocalizationManager.ResumeSkippedMessage, alreadyDone.Count)
+                );
+            }
+        }
+
+        var pairs = toExport
+            .Select(r => new
+            {
+                r.Channel,
+                r.Request,
+                Progress = _progressMuxer.CreateInput(),
+            })
+            .ToArray();
+
+        var exportStats = new ConcurrentBag<ChannelExportStats>();
+        var failedChannels = new ConcurrentBag<Channel>();
+        var successfulExportCount = 0;
+        var stopwatch = Stopwatch.StartNew();
+
+        await Parallel.ForEachAsync(
+            pairs,
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _settingsService.ParallelLimit) },
+            async (pair, cancellationToken) =>
+            {
+                var request = pair.Request;
+                var progress = pair.Progress;
+
+                try
+                {
+                    var result = await exporter.ExportChannelAsync(request, progress, cancellationToken);
+
+                    await CheckpointManifestAsync(request, result);
+
+                    exportStats.Add(
+                        new ChannelExportStats(
+                            result.MessageCount,
+                            result.AssetCount,
+                            SumFileSizes(result.Files)
+                        )
+                    );
+
+                    Interlocked.Increment(ref successfulExportCount);
+                }
+                catch (ChannelEmptyException ex)
+                {
+                    _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+
+                    // Empty channels still produce an (empty) file via exporter disposal; checkpoint it
+                    // so it counts as "done" for resume, consistent with the filtered-to-empty case.
+                    await CheckpointManifestAsync(
+                        request,
+                        new ExportResult([new ExportedFile(request.OutputFilePath, 0, null, null, null, null)], 0, 0)
+                    );
+                }
+                catch (DiscordChatExporterException ex) when (!ex.IsFatal)
+                {
+                    failedChannels.Add(pair.Channel);
+                    _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+                }
+                finally
+                {
+                    progress.ReportCompletion();
+                }
+            }
+        );
+
+        stopwatch.Stop();
+
+        if (successfulExportCount > 0)
+        {
+            var summary = ExportSummarizer.Summarize(
+                exportStats.ToArray(),
+                failedChannels.Count,
+                stopwatch.Elapsed
+            );
+
+            _snackbarManager.Notify(FormatExportSummary(summary));
+        }
+
+        CompletionAttention.FlashIfUnfocused();
+
+        return failedChannels.ToArray();
     }
 
     private bool CanContinueExport() =>

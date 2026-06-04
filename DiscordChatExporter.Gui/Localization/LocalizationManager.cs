@@ -77,6 +77,13 @@ public partial class LocalizationManager
     public string ExportCatalogWriteFailedMessage => Get();
     public string ExportSummaryMessage => Get();
     public string ExportSummaryFailedSuffix => Get();
+    public string ResumePromptTitle => Get();
+    public string ResumePromptMessage => Get();
+    public string ResumeSkipButton => Get();
+    public string ResumeExportAllButton => Get();
+    public string ResumeAllUpToDateMessage => Get();
+    public string ResumeSkippedMessage => Get();
+    public string RetryFailedTooltip => Get();
     public string PullGuildsTooltip => Get();
     public string SelectAllChannelsButton => Get();
     public string DeselectAllChannelsButton => Get();
