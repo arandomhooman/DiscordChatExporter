@@ -63,6 +63,36 @@ public static class ExportWrapper
         return await File.ReadAllTextAsync(filePath);
     }
 
+    private static async ValueTask<string> ExportToFileAsync(
+        Snowflake channelId,
+        ExportFormat format
+    )
+    {
+        var fileName = channelId.ToString() + '.' + format.GetFileExtension();
+        var filePath = Path.Combine(DirPath, fileName);
+
+        using var _ = await Locker.LockAsync(filePath);
+        using var console = new FakeConsole();
+
+        if (!File.Exists(filePath))
+        {
+            await new ExportChannelsCommand
+            {
+                Token = Secrets.DiscordToken,
+                ChannelIds = [channelId],
+                ExportFormat = format,
+                OutputPath = filePath,
+                Locale = "en-US",
+                IsUtcNormalizationEnabled = true,
+            }.ExecuteAsync(console);
+        }
+
+        return filePath;
+    }
+
+    public static async ValueTask<string> ExportAsDbAsync(Snowflake channelId) =>
+        await ExportToFileAsync(channelId, ExportFormat.Db);
+
     public static async ValueTask<IHtmlDocument> ExportAsHtmlAsync(Snowflake channelId) =>
         Html.Parse(await ExportAsync(channelId, ExportFormat.HtmlDark));
 
