@@ -27,7 +27,20 @@ public class ExportCatalogBuilderSpecs : IDisposable
         catch { }
     }
 
-    private async Task<string> WriteManifestAsync(string subDir, string file, string channelName)
+    private Task<string> WriteManifestAsync(string subDir, string file, string channelName) =>
+        WriteManifestEntryAsync(
+            subDir,
+            channelName,
+            Path.Combine(_root, subDir, file),
+            DateTimeOffset.UnixEpoch
+        );
+
+    private async Task<string> WriteManifestEntryAsync(
+        string subDir,
+        string channelName,
+        string filePath,
+        DateTimeOffset exportedAt
+    )
     {
         var dir = Path.Combine(_root, subDir);
         Directory.CreateDirectory(dir);
@@ -37,7 +50,7 @@ public class ExportCatalogBuilderSpecs : IDisposable
             "2",
             channelName,
             null,
-            Path.Combine(dir, file),
+            filePath,
             "json",
             5,
             null,
@@ -48,7 +61,7 @@ public class ExportCatalogBuilderSpecs : IDisposable
             100,
             "sha",
             false,
-            DateTimeOffset.UnixEpoch
+            exportedAt
         );
         await ManifestWriter.WriteAsync(dir, [entry], DateTimeOffset.UnixEpoch);
         return dir;
@@ -68,12 +81,41 @@ public class ExportCatalogBuilderSpecs : IDisposable
     [Fact]
     public async Task Dedupes_entries_by_file_path()
     {
-        var d1 = await WriteManifestAsync("one", "x.json", "alpha");
+        // Two DIFFERENT directories whose manifests reference the SAME File path. This exercises
+        // the by-file dictionary dedup, not just the directory-level Distinct.
+        var sharedFile = Path.Combine(_root, "shared", "x.json");
+        var d1 = await WriteManifestEntryAsync(
+            "one",
+            "alpha",
+            sharedFile,
+            DateTimeOffset.UnixEpoch
+        );
+        var d2 = await WriteManifestEntryAsync("two", "beta", sharedFile, DateTimeOffset.UnixEpoch);
 
-        // Same directory listed twice -> entry must appear once.
-        var catalog = await ExportCatalogBuilder.BuildFromDirectoriesAsync([d1, d1]);
+        var catalog = await ExportCatalogBuilder.BuildFromDirectoriesAsync([d1, d2]);
 
         catalog.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Orders_entries_by_exported_at_descending()
+    {
+        var older = await WriteManifestEntryAsync(
+            "old",
+            "oldest",
+            Path.Combine(_root, "old", "x.json"),
+            DateTimeOffset.UnixEpoch
+        );
+        var newer = await WriteManifestEntryAsync(
+            "new",
+            "newest",
+            Path.Combine(_root, "new", "y.json"),
+            DateTimeOffset.UnixEpoch.AddDays(1)
+        );
+
+        var catalog = await ExportCatalogBuilder.BuildFromDirectoriesAsync([older, newer]);
+
+        catalog.Select(e => e.ChannelName).Should().Equal("newest", "oldest");
     }
 
     [Fact]
