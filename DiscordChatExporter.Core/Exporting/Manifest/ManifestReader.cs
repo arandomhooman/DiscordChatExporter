@@ -27,7 +27,13 @@ public static class ManifestReader
                 cancellationToken
             );
         }
-        catch (Exception ex) when (ex is JsonException or IOException or NotSupportedException)
+        catch (Exception ex)
+            when (ex
+                    is JsonException
+                        or IOException
+                        or NotSupportedException
+                        or UnauthorizedAccessException
+            )
         {
             return null;
         }

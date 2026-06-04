@@ -98,4 +98,38 @@ public class ManifestBuilderSpecs : IDisposable
         entries.Should().HaveCount(2);
         entries.Should().OnlyContain(e => e.Partitioned);
     }
+
+    [Fact]
+    public void An_unreadable_output_file_is_skipped_and_the_rest_are_still_catalogued()
+    {
+        var existing = WriteFile("present.json", "hi");
+        var missing = Path.Combine(_dir, "does-not-exist.json");
+        var result = new ExportResult(
+            [
+                new ExportedFile(
+                    existing,
+                    1,
+                    new Snowflake(1),
+                    DateTimeOffset.UnixEpoch,
+                    new Snowflake(2),
+                    DateTimeOffset.UnixEpoch
+                ),
+                new ExportedFile(
+                    missing,
+                    1,
+                    new Snowflake(3),
+                    DateTimeOffset.UnixEpoch,
+                    new Snowflake(4),
+                    DateTimeOffset.UnixEpoch
+                ),
+            ],
+            2,
+            0
+        );
+
+        var entries = ManifestBuilder.Build(Info(), result, DateTimeOffset.UnixEpoch);
+
+        entries.Should().ContainSingle();
+        entries[0].File.Should().Be("present.json");
+    }
 }

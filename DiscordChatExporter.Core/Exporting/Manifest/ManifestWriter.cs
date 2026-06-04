@@ -43,19 +43,35 @@ public static class ManifestWriter
         Directory.CreateDirectory(dirPath);
 
         var tempPath = manifestPath + ".tmp";
-        await using (var stream = File.Create(tempPath))
-        {
-            await JsonSerializer.SerializeAsync(
-                stream,
-                merged,
-                ManifestJson.Options,
-                cancellationToken
-            );
-        }
 
-        if (File.Exists(manifestPath))
-            File.Replace(tempPath, manifestPath, manifestPath + ".bak");
-        else
-            File.Move(tempPath, manifestPath);
+        try
+        {
+            await using (var stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    merged,
+                    ManifestJson.Options,
+                    cancellationToken
+                );
+            }
+
+            if (File.Exists(manifestPath))
+                File.Replace(tempPath, manifestPath, manifestPath + ".bak");
+            else
+                File.Move(tempPath, manifestPath);
+        }
+        catch
+        {
+            // A failed write must not leave a stale temp file in the user's output folder.
+            try
+            {
+                File.Delete(tempPath);
+            }
+            catch
+            { /* best-effort temp cleanup */
+            }
+            throw;
+        }
     }
 }

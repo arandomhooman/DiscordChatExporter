@@ -20,9 +20,22 @@ public static class ManifestBuilder
 
         foreach (var file in result.Files)
         {
+            long sizeBytes;
+            string sha256;
+
+            // Reading an output file's size/hash is best-effort: if a single file is missing,
+            // locked, or unreadable, skip just that entry and keep cataloguing the rest.
+            try
+            {
+                sizeBytes = new FileInfo(file.FilePath).Length;
+                sha256 = ComputeSha256(file.FilePath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
             var fileName = Path.GetFileName(file.FilePath);
-            var sizeBytes = new FileInfo(file.FilePath).Length;
-            var sha256 = ComputeSha256(file.FilePath);
 
             entries.Add(
                 new ManifestEntry(

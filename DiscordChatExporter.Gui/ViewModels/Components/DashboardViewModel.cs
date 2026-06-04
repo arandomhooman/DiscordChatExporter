@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Input.Platform;
@@ -436,52 +437,74 @@ public partial class DashboardViewModel : ViewModelBase
                     var channel = pair.Channel;
                     var progress = pair.Progress;
 
-                    try
-                    {
-                        var request = new ExportRequest(
-                            dialog.Guild!,
-                            channel,
-                            dialog.OutputPath!,
-                            dialog.AssetsDirPath,
-                            dialog.SelectedFormat,
-                            dialog.After?.Pipe(Snowflake.FromDate),
-                            dialog.Before?.Pipe(Snowflake.FromDate),
-                            dialog.PartitionLimit,
-                            dialog.MessageFilter,
-                            dialog.IsReverseMessageOrder,
-                            dialog.ShouldFormatMarkdown,
-                            dialog.ShouldDownloadAssets,
-                            dialog.ShouldReuseAssets,
-                            _settingsService.Locale,
-                            _settingsService.IsUtcNormalizationEnabled
+                    static ManifestChannelInfo BuildInfo(ExportRequest r) =>
+                        new(
+                            r.Guild.Id.ToString(),
+                            r.Guild.Name,
+                            r.Channel.Id.ToString(),
+                            r.Channel.Name,
+                            r.Channel.Parent?.Name,
+                            r.Format.ToString()
                         );
 
+                    // Built outside the try so the ChannelEmptyException handler can still
+                    // catalog the empty output file (construction is pure path-building).
+                    var request = new ExportRequest(
+                        dialog.Guild!,
+                        channel,
+                        dialog.OutputPath!,
+                        dialog.AssetsDirPath,
+                        dialog.SelectedFormat,
+                        dialog.After?.Pipe(Snowflake.FromDate),
+                        dialog.Before?.Pipe(Snowflake.FromDate),
+                        dialog.PartitionLimit,
+                        dialog.MessageFilter,
+                        dialog.IsReverseMessageOrder,
+                        dialog.ShouldFormatMarkdown,
+                        dialog.ShouldDownloadAssets,
+                        dialog.ShouldReuseAssets,
+                        _settingsService.Locale,
+                        _settingsService.IsUtcNormalizationEnabled
+                    );
+
+                    try
+                    {
                         var result = await exporter.ExportChannelAsync(
                             request,
                             progress,
                             cancellationToken
                         );
 
-                        manifestData.Add(
-                            (
-                                request.OutputDirPath,
-                                new ManifestChannelInfo(
-                                    request.Guild.Id.ToString(),
-                                    request.Guild.Name,
-                                    request.Channel.Id.ToString(),
-                                    request.Channel.Name,
-                                    request.Channel.Parent?.Name,
-                                    request.Format.ToString()
-                                ),
-                                result
-                            )
-                        );
+                        manifestData.Add((request.OutputDirPath, BuildInfo(request), result));
 
                         Interlocked.Increment(ref successfulExportCount);
                     }
                     catch (ChannelEmptyException ex)
                     {
                         _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+
+                        // Empty channels still produce an (empty) output file via exporter
+                        // disposal; catalog it for consistency with the filtered-to-empty case.
+                        manifestData.Add(
+                            (
+                                request.OutputDirPath,
+                                BuildInfo(request),
+                                new ExportResult(
+                                    [
+                                        new ExportedFile(
+                                            request.OutputFilePath,
+                                            0,
+                                            null,
+                                            null,
+                                            null,
+                                            null
+                                        ),
+                                    ],
+                                    0,
+                                    0
+                                )
+                            )
+                        );
                     }
                     catch (DiscordChatExporterException ex) when (!ex.IsFatal)
                     {
@@ -494,13 +517,17 @@ public partial class DashboardViewModel : ViewModelBase
                 }
             );
 
-            // Write/update the export catalog (best-effort: never fail the export over it)
+            // Write/update the export catalog (best-effort: never fail the export over it).
+            // Each output directory is guarded independently so one bad directory neither
+            // aborts the others nor spams the same failure notification.
             if (!manifestData.IsEmpty)
             {
-                try
+                var now = DateTimeOffset.Now;
+                var catalogFailed = false;
+
+                foreach (var group in manifestData.GroupBy(d => d.Dir))
                 {
-                    var now = DateTimeOffset.Now;
-                    foreach (var group in manifestData.GroupBy(d => d.Dir))
+                    try
                     {
                         var entries = group
                             .SelectMany(d => ManifestBuilder.Build(d.Info, d.Result, now))
@@ -508,8 +535,14 @@ public partial class DashboardViewModel : ViewModelBase
 
                         await ManifestWriter.WriteAsync(group.Key, entries, now);
                     }
+                    catch (Exception ex)
+                        when (ex is IOException or UnauthorizedAccessException or JsonException)
+                    {
+                        catalogFailed = true;
+                    }
                 }
-                catch
+
+                if (catalogFailed)
                 {
                     _snackbarManager.Notify(
                         LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.')
