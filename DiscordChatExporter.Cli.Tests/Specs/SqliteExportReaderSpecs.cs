@@ -134,6 +134,23 @@ public class SqliteExportReaderSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Operator_keywords_are_treated_as_literal_terms_not_fts_operators()
+    {
+        var db = await WriteDbAsync(
+            "a.db",
+            (1, "the fox OR cat appeared"),
+            (2, "lonely fox runs"),
+            (3, "lonely cat sleeps")
+        );
+
+        // If "OR" reached MATCH raw, FTS5 would union and match all three. Escaping it to a
+        // literal term means it must AND with "fox" and "cat" -> only message 1 has all three.
+        var hits = await SqliteExportReader.SearchAsync(db, "fox OR cat", 50, default);
+
+        hits.Select(h => h.MessageId).Should().Equal("1");
+    }
+
+    [Fact]
     public async Task Special_characters_in_the_query_do_not_throw()
     {
         var db = await WriteDbAsync("a.db", (1, "hello world"));
