@@ -151,6 +151,7 @@ internal partial class MessageExporter
                 "Light"
             ),
             ExportFormat.Json => new JsonMessageWriter(File.Create(filePath), context),
+            ExportFormat.Db => new SqliteMessageWriter(filePath, context),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(format),
                 $"Unknown export format '{format}'."
