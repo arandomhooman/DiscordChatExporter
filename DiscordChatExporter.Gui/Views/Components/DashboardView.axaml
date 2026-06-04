@@ -308,6 +308,26 @@
                 </ScrollViewer>
             </Panel>
 
+            <!--  Retry failed button  -->
+            <Button
+                Width="56"
+                Height="56"
+                Margin="32,24,176,24"
+                Padding="0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Background="{DynamicResource MaterialDarkBackgroundBrush}"
+                Command="{Binding RetryFailedExportCommand}"
+                Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                IsVisible="{Binding HasFailedExport}"
+                Theme="{DynamicResource MaterialIconButton}"
+                ToolTip.Tip="{Binding LocalizationManager.RetryFailedTooltip}">
+                <materialIcons:MaterialIcon
+                    Width="32"
+                    Height="32"
+                    Kind="Refresh" />
+            </Button>
+
             <!--  Continue export button  -->
             <Button
                 Width="56"

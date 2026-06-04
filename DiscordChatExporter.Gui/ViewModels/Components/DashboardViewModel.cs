@@ -96,6 +96,7 @@ public partial class DashboardViewModel : ViewModelBase
     [NotifyCanExecuteChangedFor(nameof(PullChannelsCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(ContinueExportCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RetryFailedExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(SelectAllChannelsCommand))]
     public partial bool IsBusy { get; set; }
 
@@ -482,12 +483,19 @@ public partial class DashboardViewModel : ViewModelBase
     {
         try
         {
-            var entries = ManifestBuilder.Build(BuildManifestInfo(request), result, DateTimeOffset.Now);
+            var entries = ManifestBuilder.Build(
+                BuildManifestInfo(request),
+                result,
+                DateTimeOffset.Now
+            );
             await ManifestWriter.WriteAsync(request.OutputDirPath, entries, DateTimeOffset.Now);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex)
+            when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            _snackbarManager.Notify(LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.'));
+            _snackbarManager.Notify(
+                LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.')
+            );
         }
     }
 
@@ -503,7 +511,9 @@ public partial class DashboardViewModel : ViewModelBase
             .ToArray();
 
         // Resume detection: which selected channels are already exported in their target directory?
-        var manifestsByDir = new Dictionary<string, ExportManifest?>(StringComparer.OrdinalIgnoreCase);
+        var manifestsByDir = new Dictionary<string, ExportManifest?>(
+            StringComparer.OrdinalIgnoreCase
+        );
         var alreadyDone = new List<(Channel Channel, ExportRequest Request)>();
 
         foreach (var r in requests)
@@ -571,7 +581,10 @@ public partial class DashboardViewModel : ViewModelBase
 
         await Parallel.ForEachAsync(
             pairs,
-            new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _settingsService.ParallelLimit) },
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Max(1, _settingsService.ParallelLimit),
+            },
             async (pair, cancellationToken) =>
             {
                 var request = pair.Request;
@@ -579,7 +592,11 @@ public partial class DashboardViewModel : ViewModelBase
 
                 try
                 {
-                    var result = await exporter.ExportChannelAsync(request, progress, cancellationToken);
+                    var result = await exporter.ExportChannelAsync(
+                        request,
+                        progress,
+                        cancellationToken
+                    );
 
                     await CheckpointManifestAsync(request, result);
 
@@ -601,7 +618,11 @@ public partial class DashboardViewModel : ViewModelBase
                     // so it counts as "done" for resume, consistent with the filtered-to-empty case.
                     await CheckpointManifestAsync(
                         request,
-                        new ExportResult([new ExportedFile(request.OutputFilePath, 0, null, null, null, null)], 0, 0)
+                        new ExportResult(
+                            [new ExportedFile(request.OutputFilePath, 0, null, null, null, null)],
+                            0,
+                            0
+                        )
                     );
                 }
                 catch (DiscordChatExporterException ex) when (!ex.IsFatal)
@@ -633,6 +654,47 @@ public partial class DashboardViewModel : ViewModelBase
 
         return failedChannels.ToArray();
     }
+
+    private bool CanRetryFailedExport() =>
+        !IsBusy
+        && _discord is not null
+        && _lastExportSetup is not null
+        && _lastFailedChannels.Count > 0;
+
+    [RelayCommand(CanExecute = nameof(CanRetryFailedExport))]
+    private async Task RetryFailedExportAsync()
+    {
+        if (_discord is null || _lastExportSetup is null || _lastFailedChannels.Count == 0)
+            return;
+
+        IsBusy = true;
+        _etaEstimator.Reset();
+
+        try
+        {
+            var exporter = new ChannelExporter(_discord);
+            var failed = await RunExportCoreAsync(exporter, _lastExportSetup, _lastFailedChannels);
+            _lastFailedChannels = failed;
+            OnPropertyChanged(nameof(HasFailedExport));
+            RetryFailedExportCommand.NotifyCanExecuteChanged();
+        }
+        catch (Exception ex)
+        {
+            var messageBox = _viewModelManager.GetMessageBoxViewModel(
+                LocalizationManager.ErrorExportingTitle,
+                ex.ToString()
+            );
+
+            await _dialogManager.ShowDialogAsync(messageBox);
+        }
+        finally
+        {
+            IsBusy = false;
+            EtaText = null;
+        }
+    }
+
+    public bool HasFailedExport => _lastFailedChannels.Count > 0;
 
     private bool CanContinueExport() =>
         !IsBusy && _discord is not null && SelectedGuild is not null && SelectedChannels.Any();
