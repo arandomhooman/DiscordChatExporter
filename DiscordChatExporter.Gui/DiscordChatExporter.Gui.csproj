@@ -5,6 +5,8 @@
     <ApplicationIcon>../favicon.ico</ApplicationIcon>
     <PublishTrimmed>true</PublishTrimmed>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <!-- [LibraryImport] (CompletionAttention taskbar flash) source-generates marshalling that requires unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <PropertyGroup>
