@@ -298,4 +298,32 @@ public class SqliteMessageWriterSpecs : IDisposable
         command.CommandText = "SELECT id FROM messages;";
         ((string)command.ExecuteScalar()!).Should().Be("4002");
     }
+
+    [Fact]
+    public async Task It_stores_a_custom_animated_emoji_reaction()
+    {
+        // Arrange — a custom animated emoji has an id and IsAnimated == true.
+        var alice = CreateUser(10, "alice");
+        var reaction = new Reaction(new Emoji(new Snowflake(123), "blob", true), 1);
+        var msg = CreateMessage(5001, alice, "custom emoji message", null, [reaction]);
+
+        // Act
+        await using (var writer = new SqliteMessageWriter(DbPath, CreateContext(DbPath)))
+        {
+            await writer.WritePreambleAsync();
+            await writer.WriteMessageAsync(msg);
+            await writer.WritePostambleAsync();
+        }
+
+        // Assert
+        using var connection = OpenReadOnly(DbPath);
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT emoji_id, emoji_name, is_animated FROM reactions WHERE message_id = '5001';";
+        using var reader = command.ExecuteReader();
+        reader.Read().Should().BeTrue();
+        reader.GetString(0).Should().Be("123");
+        reader.GetString(1).Should().Be("blob");
+        reader.GetInt64(2).Should().Be(1);
+    }
 }
