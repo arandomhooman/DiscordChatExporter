@@ -21,9 +21,9 @@ public static class ManifestReader
         try
         {
             await using var stream = File.OpenRead(filePath);
-            return await JsonSerializer.DeserializeAsync<ExportManifest>(
+            return await JsonSerializer.DeserializeAsync(
                 stream,
-                ManifestJson.Options,
+                ManifestJsonContext.Default.ExportManifest,
                 cancellationToken
             );
         }

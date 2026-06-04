@@ -58,7 +58,7 @@ public static class ManifestWriter
                 await JsonSerializer.SerializeAsync(
                     stream,
                     merged,
-                    ManifestJson.Options,
+                    ManifestJsonContext.Default.ExportManifest,
                     cancellationToken
                 );
             }
