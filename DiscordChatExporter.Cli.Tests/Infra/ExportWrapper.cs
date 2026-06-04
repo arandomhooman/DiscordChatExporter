@@ -38,30 +38,8 @@ public static class ExportWrapper
         Directory.CreateDirectory(DirPath);
     }
 
-    private static async ValueTask<string> ExportAsync(Snowflake channelId, ExportFormat format)
-    {
-        var fileName = channelId.ToString() + '.' + format.GetFileExtension();
-        var filePath = Path.Combine(DirPath, fileName);
-
-        using var _ = await Locker.LockAsync(filePath);
-        using var console = new FakeConsole();
-
-        // Perform the export only if it hasn't been done before
-        if (!File.Exists(filePath))
-        {
-            await new ExportChannelsCommand
-            {
-                Token = Secrets.DiscordToken,
-                ChannelIds = [channelId],
-                ExportFormat = format,
-                OutputPath = filePath,
-                Locale = "en-US",
-                IsUtcNormalizationEnabled = true,
-            }.ExecuteAsync(console);
-        }
-
-        return await File.ReadAllTextAsync(filePath);
-    }
+    private static async ValueTask<string> ExportAsync(Snowflake channelId, ExportFormat format) =>
+        await File.ReadAllTextAsync(await ExportToFileAsync(channelId, format));
 
     private static async ValueTask<string> ExportToFileAsync(
         Snowflake channelId,
@@ -74,6 +52,7 @@ public static class ExportWrapper
         using var _ = await Locker.LockAsync(filePath);
         using var console = new FakeConsole();
 
+        // Perform the export only if it hasn't been done before
         if (!File.Exists(filePath))
         {
             await new ExportChannelsCommand
