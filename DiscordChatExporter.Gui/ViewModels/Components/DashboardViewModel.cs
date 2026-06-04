@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -15,6 +16,7 @@ using DiscordChatExporter.Core.Exceptions;
 using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Continuation;
 using DiscordChatExporter.Core.Exporting.Filtering;
+using DiscordChatExporter.Core.Exporting.Manifest;
 using DiscordChatExporter.Core.Exporting.Partitioning;
 using DiscordChatExporter.Gui.Framework;
 using DiscordChatExporter.Gui.Localization;
@@ -414,6 +416,9 @@ public partial class DashboardViewModel : ViewModelBase
                 return;
             }
 
+            var manifestData =
+                new ConcurrentBag<(string Dir, ManifestChannelInfo Info, ExportResult Result)>();
+
             var channelProgressPairs = dialog
                 .Channels!.Select(c => new { Channel = c, Progress = _progressMuxer.CreateInput() })
                 .ToArray();
@@ -451,7 +456,26 @@ public partial class DashboardViewModel : ViewModelBase
                             _settingsService.IsUtcNormalizationEnabled
                         );
 
-                        await exporter.ExportChannelAsync(request, progress, cancellationToken);
+                        var result = await exporter.ExportChannelAsync(
+                            request,
+                            progress,
+                            cancellationToken
+                        );
+
+                        manifestData.Add(
+                            (
+                                request.OutputDirPath,
+                                new ManifestChannelInfo(
+                                    request.Guild.Id.ToString(),
+                                    request.Guild.Name,
+                                    request.Channel.Id.ToString(),
+                                    request.Channel.Name,
+                                    request.Channel.Parent?.Name,
+                                    request.Format.ToString()
+                                ),
+                                result
+                            )
+                        );
 
                         Interlocked.Increment(ref successfulExportCount);
                     }
@@ -469,6 +493,29 @@ public partial class DashboardViewModel : ViewModelBase
                     }
                 }
             );
+
+            // Write/update the export catalog (best-effort: never fail the export over it)
+            if (!manifestData.IsEmpty)
+            {
+                try
+                {
+                    var now = DateTimeOffset.Now;
+                    foreach (var group in manifestData.GroupBy(d => d.Dir))
+                    {
+                        var entries = group
+                            .SelectMany(d => ManifestBuilder.Build(d.Info, d.Result, now))
+                            .ToArray();
+
+                        await ManifestWriter.WriteAsync(group.Key, entries, now);
+                    }
+                }
+                catch
+                {
+                    _snackbarManager.Notify(
+                        LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.')
+                    );
+                }
+            }
 
             // Notify of the overall completion
             if (successfulExportCount > 0)

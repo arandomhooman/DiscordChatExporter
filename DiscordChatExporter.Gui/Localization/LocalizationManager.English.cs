@@ -10,6 +10,8 @@ public partial class LocalizationManager
             // Dashboard
             [nameof(EtaEstimatingText)] = "estimating time remaining…",
             [nameof(EtaRemainingFormat)] = "~{0} left",
+            [nameof(ExportCatalogWriteFailedMessage)] =
+                "Export finished, but the catalog (manifest.json) could not be updated.",
             [nameof(PullGuildsTooltip)] = "Pull available servers and channels (Enter)",
             [nameof(SelectAllChannelsButton)] = "Select all",
             [nameof(DeselectAllChannelsButton)] = "Deselect all",
