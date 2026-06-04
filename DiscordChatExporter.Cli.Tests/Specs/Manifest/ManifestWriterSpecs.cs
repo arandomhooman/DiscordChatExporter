@@ -79,4 +79,29 @@ public class ManifestWriterSpecs : IDisposable
 
         File.Exists(Path.Combine(_dir, ExportManifest.FileName + ".bak")).Should().BeTrue();
     }
+
+    [Fact]
+    public async Task Concurrent_writes_to_the_same_manifest_do_not_lose_entries()
+    {
+        // Fire many parallel writes, each adding a distinct file. Without serialization,
+        // the read-merge-write race would clobber entries (last-writer-wins on the whole file).
+        const int count = 50;
+
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, count),
+            async (i, ct) =>
+                await ManifestWriter.WriteAsync(
+                    _dir,
+                    [Entry($"file{i}.json", i)],
+                    DateTimeOffset.UnixEpoch,
+                    ct
+                )
+        );
+
+        var manifest = await ManifestReader.TryReadAsync(
+            Path.Combine(_dir, ExportManifest.FileName)
+        );
+        manifest.Should().NotBeNull();
+        manifest!.Entries.Should().HaveCount(count);
+    }
 }

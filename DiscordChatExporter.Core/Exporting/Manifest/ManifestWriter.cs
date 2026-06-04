@@ -5,11 +5,16 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using AsyncKeyedLock;
 
 namespace DiscordChatExporter.Core.Exporting.Manifest;
 
 public static class ManifestWriter
 {
+    // Serializes the read-merge-write of a given manifest file so per-channel checkpoint writes
+    // from the parallel export loop don't clobber each other. Keyed by manifest path; MUST be static.
+    private static readonly AsyncKeyedLocker<string> Locker = new();
+
     // Writes/updates <dirPath>/manifest.json by merging the given entries into any existing
     // manifest, keyed by file name (a new entry for the same file replaces the old one).
     // Atomic: writes a temp file then swaps it in, keeping a .bak of the previous manifest.
@@ -21,6 +26,8 @@ public static class ManifestWriter
     )
     {
         var manifestPath = Path.Combine(dirPath, ExportManifest.FileName);
+
+        using var _ = await Locker.LockAsync(manifestPath, cancellationToken);
 
         var byFile = new Dictionary<string, ManifestEntry>(StringComparer.OrdinalIgnoreCase);
 
