@@ -72,6 +72,9 @@ public partial class SettingsService()
     [ObservableProperty]
     public partial string? LastAssetsDirPath { get; set; }
 
+    [ObservableProperty]
+    public partial string[] KnownExportDirs { get; set; } = [];
+
     public override void Save()
     {
         // Clear the token if it's not supposed to be persisted

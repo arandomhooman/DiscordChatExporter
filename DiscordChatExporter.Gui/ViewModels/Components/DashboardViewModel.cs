@@ -19,6 +19,7 @@ using DiscordChatExporter.Core.Exceptions;
 using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Continuation;
 using DiscordChatExporter.Core.Exporting.Filtering;
+using DiscordChatExporter.Core.Exporting.Library;
 using DiscordChatExporter.Core.Exporting.Manifest;
 using DiscordChatExporter.Core.Exporting.Partitioning;
 using DiscordChatExporter.Gui.Framework;
@@ -580,6 +581,7 @@ public partial class DashboardViewModel : ViewModelBase
 
         var exportStats = new ConcurrentBag<ChannelExportStats>();
         var failedChannels = new ConcurrentBag<Channel>();
+        var exportedDirs = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         var successfulExportCount = 0;
         var catalogWriteFailed = 0;
         var stopwatch = Stopwatch.StartNew();
@@ -615,6 +617,9 @@ public partial class DashboardViewModel : ViewModelBase
                     );
 
                     Interlocked.Increment(ref successfulExportCount);
+
+                    // Remember this export's output folder so the Library can catalog it later.
+                    exportedDirs.TryAdd(request.OutputDirPath, 0);
                 }
                 catch (ChannelEmptyException ex)
                 {
@@ -666,6 +671,14 @@ public partial class DashboardViewModel : ViewModelBase
             );
 
             _snackbarManager.Notify(FormatExportSummary(summary));
+
+            // Persist the exported folders so the Library home view can discover them.
+            foreach (var dir in exportedDirs.Keys)
+                _settingsService.KnownExportDirs = RecentExportDirs
+                    .Add(_settingsService.KnownExportDirs, dir, 50)
+                    .ToArray();
+
+            _settingsService.Save();
         }
 
         // Best-effort: a manifest write failure never fails the export, but surface it once per run
