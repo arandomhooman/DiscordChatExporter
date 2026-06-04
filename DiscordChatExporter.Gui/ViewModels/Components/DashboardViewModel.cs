@@ -479,7 +479,12 @@ public partial class DashboardViewModel : ViewModelBase
         );
 
     // Best-effort per-channel manifest checkpoint. Failure must never fail the channel's export.
-    private async ValueTask CheckpointManifestAsync(ExportRequest request, ExportResult result)
+    // Returns true if the manifest was written, false if a write failure was swallowed (the caller
+    // notifies once per run rather than once per channel).
+    private async ValueTask<bool> CheckpointManifestAsync(
+        ExportRequest request,
+        ExportResult result
+    )
     {
         try
         {
@@ -489,13 +494,12 @@ public partial class DashboardViewModel : ViewModelBase
                 DateTimeOffset.Now
             );
             await ManifestWriter.WriteAsync(request.OutputDirPath, entries, DateTimeOffset.Now);
+            return true;
         }
         catch (Exception ex)
             when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            _snackbarManager.Notify(
-                LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.')
-            );
+            return false;
         }
     }
 
@@ -552,7 +556,7 @@ public partial class DashboardViewModel : ViewModelBase
                 LocalizationManager.ResumePromptTitle,
                 string.Format(LocalizationManager.ResumePromptMessage, alreadyDone.Count),
                 LocalizationManager.ResumeSkipButton, // default -> true -> skip (resume)
-                LocalizationManager.ResumeExportAllButton // cancel -> false/null -> export all
+                LocalizationManager.ResumeExportAllButton // cancel (EXPORT ALL) -> null -> export all
             );
 
             if (await _dialogManager.ShowDialogAsync(prompt) == true)
@@ -577,6 +581,7 @@ public partial class DashboardViewModel : ViewModelBase
         var exportStats = new ConcurrentBag<ChannelExportStats>();
         var failedChannels = new ConcurrentBag<Channel>();
         var successfulExportCount = 0;
+        var catalogWriteFailed = 0;
         var stopwatch = Stopwatch.StartNew();
 
         await Parallel.ForEachAsync(
@@ -598,7 +603,8 @@ public partial class DashboardViewModel : ViewModelBase
                         cancellationToken
                     );
 
-                    await CheckpointManifestAsync(request, result);
+                    if (!await CheckpointManifestAsync(request, result))
+                        Interlocked.Exchange(ref catalogWriteFailed, 1);
 
                     exportStats.Add(
                         new ChannelExportStats(
@@ -616,14 +622,26 @@ public partial class DashboardViewModel : ViewModelBase
 
                     // Empty channels still produce an (empty) file via exporter disposal; checkpoint it
                     // so it counts as "done" for resume, consistent with the filtered-to-empty case.
-                    await CheckpointManifestAsync(
-                        request,
-                        new ExportResult(
-                            [new ExportedFile(request.OutputFilePath, 0, null, null, null, null)],
-                            0,
-                            0
+                    if (
+                        !await CheckpointManifestAsync(
+                            request,
+                            new ExportResult(
+                                [
+                                    new ExportedFile(
+                                        request.OutputFilePath,
+                                        0,
+                                        null,
+                                        null,
+                                        null,
+                                        null
+                                    ),
+                                ],
+                                0,
+                                0
+                            )
                         )
-                    );
+                    )
+                        Interlocked.Exchange(ref catalogWriteFailed, 1);
                 }
                 catch (DiscordChatExporterException ex) when (!ex.IsFatal)
                 {
@@ -649,6 +667,13 @@ public partial class DashboardViewModel : ViewModelBase
 
             _snackbarManager.Notify(FormatExportSummary(summary));
         }
+
+        // Best-effort: a manifest write failure never fails the export, but surface it once per run
+        // rather than once per affected channel.
+        if (catalogWriteFailed == 1)
+            _snackbarManager.Notify(
+                LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.')
+            );
 
         CompletionAttention.FlashIfUnfocused();
 
