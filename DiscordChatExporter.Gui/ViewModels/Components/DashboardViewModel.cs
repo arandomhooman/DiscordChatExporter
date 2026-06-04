@@ -2,6 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -23,6 +25,7 @@ using DiscordChatExporter.Gui.Framework;
 using DiscordChatExporter.Gui.Localization;
 using DiscordChatExporter.Gui.Models;
 using DiscordChatExporter.Gui.Services;
+using DiscordChatExporter.Gui.Utils;
 using DiscordChatExporter.Gui.Utils.Extensions;
 using DiscordChatExporter.Gui.ViewModels.Dialogs;
 using Gress;
@@ -420,6 +423,10 @@ public partial class DashboardViewModel : ViewModelBase
             var manifestData =
                 new ConcurrentBag<(string Dir, ManifestChannelInfo Info, ExportResult Result)>();
 
+            var exportStats = new ConcurrentBag<ChannelExportStats>();
+            var failedExportCount = 0;
+            var stopwatch = Stopwatch.StartNew();
+
             var channelProgressPairs = dialog
                 .Channels!.Select(c => new { Channel = c, Progress = _progressMuxer.CreateInput() })
                 .ToArray();
@@ -477,6 +484,14 @@ public partial class DashboardViewModel : ViewModelBase
 
                         manifestData.Add((request.OutputDirPath, BuildInfo(request), result));
 
+                        exportStats.Add(
+                            new ChannelExportStats(
+                                result.MessageCount,
+                                result.AssetCount,
+                                SumFileSizes(result.Files)
+                            )
+                        );
+
                         Interlocked.Increment(ref successfulExportCount);
                     }
                     catch (ChannelEmptyException ex)
@@ -508,6 +523,7 @@ public partial class DashboardViewModel : ViewModelBase
                     }
                     catch (DiscordChatExporterException ex) when (!ex.IsFatal)
                     {
+                        Interlocked.Increment(ref failedExportCount);
                         _snackbarManager.Notify(ex.Message.TrimEnd('.'));
                     }
                     finally
@@ -550,16 +566,21 @@ public partial class DashboardViewModel : ViewModelBase
                 }
             }
 
-            // Notify of the overall completion
+            // Notify of the overall completion with a summary
+            stopwatch.Stop();
             if (successfulExportCount > 0)
             {
-                _snackbarManager.Notify(
-                    string.Format(
-                        LocalizationManager.SuccessfulExportMessage,
-                        successfulExportCount
-                    )
+                var summary = ExportSummarizer.Summarize(
+                    exportStats.ToArray(),
+                    failedExportCount,
+                    stopwatch.Elapsed
                 );
+
+                _snackbarManager.Notify(FormatExportSummary(summary));
             }
+
+            // Flash the taskbar if the user isn't watching (best-effort, Windows only)
+            CompletionAttention.FlashIfUnfocused();
         }
         catch (Exception ex)
         {
@@ -740,6 +761,50 @@ public partial class DashboardViewModel : ViewModelBase
         t.TotalHours >= 1 ? $"{(int)t.TotalHours}h{t.Minutes:D2}m"
         : t.TotalMinutes >= 1 ? $"{t.Minutes}m{t.Seconds:D2}s"
         : $"{t.Seconds}s";
+
+    private string FormatExportSummary(ExportSummary summary)
+    {
+        var message = string.Format(
+            LocalizationManager.ExportSummaryMessage,
+            summary.SucceededChannels,
+            summary.TotalMessages.ToString("N0", CultureInfo.CurrentCulture),
+            summary.TotalAssets.ToString("N0", CultureInfo.CurrentCulture),
+            FormatBytes(summary.TotalBytes),
+            FormatDuration(summary.Duration)
+        );
+
+        if (summary.FailedChannels > 0)
+            message += string.Format(
+                LocalizationManager.ExportSummaryFailedSuffix,
+                summary.FailedChannels
+            );
+
+        return message;
+    }
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1024L * 1024 * 1024 ? $"{bytes / (1024.0 * 1024 * 1024):0.0} GB"
+        : bytes >= 1024L * 1024 ? $"{bytes / (1024.0 * 1024):0.0} MB"
+        : bytes >= 1024 ? $"{bytes / 1024.0:0.0} KB"
+        : $"{bytes} B";
+
+    private static long SumFileSizes(IReadOnlyList<ExportedFile> files)
+    {
+        long total = 0;
+        foreach (var file in files)
+        {
+            try
+            {
+                total += new FileInfo(file.FilePath).Length;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort: a size we can't read just doesn't contribute to the total.
+            }
+        }
+
+        return total;
+    }
 
     private static bool IsPartitionedExportPath(string filePath)
     {

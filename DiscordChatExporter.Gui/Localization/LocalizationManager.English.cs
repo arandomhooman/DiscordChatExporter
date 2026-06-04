@@ -12,6 +12,9 @@ public partial class LocalizationManager
             [nameof(EtaRemainingFormat)] = "~{0} left",
             [nameof(ExportCatalogWriteFailedMessage)] =
                 "Export finished, but the catalog (manifest.json) could not be updated.",
+            [nameof(ExportSummaryMessage)] =
+                "Exported {0} channel(s) · {1} message(s) · {2} asset(s) · {3} · {4}",
+            [nameof(ExportSummaryFailedSuffix)] = " · {0} failed",
             [nameof(PullGuildsTooltip)] = "Pull available servers and channels (Enter)",
             [nameof(SelectAllChannelsButton)] = "Select all",
             [nameof(DeselectAllChannelsButton)] = "Deselect all",

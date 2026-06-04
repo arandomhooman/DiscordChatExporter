@@ -75,6 +75,8 @@ public partial class LocalizationManager
     public string EtaEstimatingText => Get();
     public string EtaRemainingFormat => Get();
     public string ExportCatalogWriteFailedMessage => Get();
+    public string ExportSummaryMessage => Get();
+    public string ExportSummaryFailedSuffix => Get();
     public string PullGuildsTooltip => Get();
     public string SelectAllChannelsButton => Get();
     public string DeselectAllChannelsButton => Get();
