@@ -14,14 +14,6 @@ internal partial class CsvMessageWriter(Stream stream, ExportContext context)
 {
     private readonly TextWriter _writer = new StreamWriter(stream);
 
-    private async ValueTask<string> FormatMarkdownAsync(
-        string markdown,
-        CancellationToken cancellationToken = default
-    ) =>
-        Context.Request.ShouldFormatMarkdown
-            ? await PlainTextMarkdownVisitor.FormatAsync(Context, markdown, cancellationToken)
-            : markdown;
-
     public override async ValueTask WritePreambleAsync(
         CancellationToken cancellationToken = default
     ) => await _writer.WriteLineAsync("AuthorID,Author,Date,Content,Attachments,Reactions");

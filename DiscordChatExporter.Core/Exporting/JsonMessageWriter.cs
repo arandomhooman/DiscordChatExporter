@@ -30,14 +30,6 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         }
     );
 
-    private async ValueTask<string> FormatMarkdownAsync(
-        string markdown,
-        CancellationToken cancellationToken = default
-    ) =>
-        Context.Request.ShouldFormatMarkdown
-            ? await PlainTextMarkdownVisitor.FormatAsync(Context, markdown, cancellationToken)
-            : markdown;
-
     private async ValueTask WriteUserAsync(
         User user,
         bool includeRoles = true,

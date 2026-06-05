@@ -13,14 +13,6 @@ internal class PlainTextMessageWriter(Stream stream, ExportContext context)
 {
     private readonly TextWriter _writer = new StreamWriter(stream);
 
-    private async ValueTask<string> FormatMarkdownAsync(
-        string markdown,
-        CancellationToken cancellationToken = default
-    ) =>
-        Context.Request.ShouldFormatMarkdown
-            ? await PlainTextMarkdownVisitor.FormatAsync(Context, markdown, cancellationToken)
-            : markdown;
-
     private async ValueTask WriteMessageHeaderAsync(Message message)
     {
         // Timestamp & author

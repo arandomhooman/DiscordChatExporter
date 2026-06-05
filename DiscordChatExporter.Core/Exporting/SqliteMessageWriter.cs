@@ -5,7 +5,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord.Data;
-using DiscordChatExporter.Core.Markdown.Parsing;
 using Microsoft.Data.Sqlite;
 using PowerKit.Extensions;
 
@@ -85,14 +84,6 @@ internal class SqliteMessageWriter : MessageWriter
     {
         _databaseFilePath = databaseFilePath;
     }
-
-    private async ValueTask<string> FormatMarkdownAsync(
-        string markdown,
-        CancellationToken cancellationToken = default
-    ) =>
-        Context.Request.ShouldFormatMarkdown
-            ? await PlainTextMarkdownVisitor.FormatAsync(Context, markdown, cancellationToken)
-            : markdown;
 
     private string? NormalizeOrNull(DateTimeOffset? instant) =>
         instant is { } value
