@@ -15,6 +15,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
+using DiscordChatExporter.Core.Discord.Data.Common;
 using DiscordChatExporter.Core.Exceptions;
 using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Continuation;
@@ -435,9 +436,7 @@ public partial class DashboardViewModel : ViewModelBase
             var failed = await RunExportCoreAsync(exporter, dialog, channels);
 
             _lastExportSetup = dialog;
-            _lastFailedChannels = failed;
-            OnPropertyChanged(nameof(HasFailedExport));
-            RetryFailedExportCommand.NotifyCanExecuteChanged();
+            UpdateFailedChannels(failed);
         }
         catch (Exception ex)
         {
@@ -507,6 +506,90 @@ public partial class DashboardViewModel : ViewModelBase
             when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return false;
+        }
+    }
+
+    // Adds the given output folders to the persisted KnownExportDirs (most-recent-first, deduped,
+    // capped) in a single settings write, so the Library home view can discover past exports. The
+    // shared seam every write path (export, retry, continue) funnels its output folder through.
+    private void RegisterExportedDirs(IReadOnlyCollection<string> dirs)
+    {
+        if (dirs.Count == 0)
+            return;
+
+        var known = _settingsService.KnownExportDirs;
+        foreach (var dir in dirs)
+            known = RecentExportDirs.Add(known, dir, 200).ToArray();
+
+        _settingsService.KnownExportDirs = known;
+        _settingsService.Save();
+    }
+
+    // After a continue grows an existing export file, refresh its manifest entry (fresh count,
+    // size, and hash) and register its folder so the Library catalog stays in sync. Best-effort:
+    // a catalog failure must never fail the continue itself.
+    private async Task RefreshContinuedExportCatalogAsync(
+        string filePath,
+        Guild guild,
+        Channel channel,
+        long messageCount
+    )
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(filePath);
+            if (string.IsNullOrEmpty(dir))
+                return;
+
+            var fileName = Path.GetFileName(filePath);
+            var existing = await ManifestReader.TryReadAsync(
+                Path.Combine(dir, ExportManifest.FileName)
+            );
+            var prior = existing?.Entries.FirstOrDefault(e =>
+                string.Equals(e.File, fileName, StringComparison.OrdinalIgnoreCase)
+            );
+
+            var info = new ManifestChannelInfo(
+                guild.Id.ToString(),
+                guild.Name,
+                channel.Id.ToString(),
+                channel.Name,
+                channel.Parent?.Name,
+                // Preserve the original format string (e.g. HtmlLight vs HtmlDark, which the file
+                // extension alone can't distinguish); fall back to the extension mapping.
+                prior?.Format
+                    ?? ContinuationFormat.FormatFor(filePath).ToString()
+            );
+
+            var result = new ExportResult(
+                [new ExportedFile(filePath, messageCount, null, null, null, null)],
+                messageCount,
+                0
+            );
+
+            var entries = ManifestBuilder.Build(info, result, DateTimeOffset.Now);
+            if (entries.Count == 0)
+                return;
+
+            // Continue doesn't re-scan the whole file, so carry the first-message metadata forward
+            // from the prior entry rather than nulling it; count/size/hash above are freshly read.
+            if (prior is not null)
+                entries =
+                [
+                    entries[0] with
+                    {
+                        FirstMessageId = prior.FirstMessageId,
+                        FirstMessageTimestamp = prior.FirstMessageTimestamp,
+                    },
+                ];
+
+            await ManifestWriter.WriteAsync(dir, entries, DateTimeOffset.Now);
+            RegisterExportedDirs([dir]);
+        }
+        catch (Exception ex)
+            when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // Best-effort: a catalog refresh failure must not fail the continue itself.
         }
     }
 
@@ -653,6 +736,9 @@ public partial class DashboardViewModel : ViewModelBase
                         )
                     )
                         Interlocked.Exchange(ref catalogWriteFailed, 1);
+
+                    // Track the folder even for an empty export so the Library can catalog it.
+                    exportedDirs.TryAdd(request.OutputDirPath, 0);
                 }
                 catch (DiscordChatExporterException ex) when (!ex.IsFatal)
                 {
@@ -677,15 +763,11 @@ public partial class DashboardViewModel : ViewModelBase
             );
 
             _snackbarManager.Notify(FormatExportSummary(summary));
-
-            // Persist the exported folders so the Library home view can discover them.
-            foreach (var dir in exportedDirs.Keys)
-                _settingsService.KnownExportDirs = RecentExportDirs
-                    .Add(_settingsService.KnownExportDirs, dir, 200)
-                    .ToArray();
-
-            _settingsService.Save();
         }
+
+        // Persist every folder we wrote into (including empty-channel exports) so the Library home
+        // view can discover them — even when no channel had messages.
+        RegisterExportedDirs(exportedDirs.Keys.ToArray());
 
         // Best-effort: a manifest write failure never fails the export, but surface it once per run
         // rather than once per affected channel.
@@ -697,6 +779,15 @@ public partial class DashboardViewModel : ViewModelBase
         CompletionAttention.FlashIfUnfocused();
 
         return failedChannels.ToArray();
+    }
+
+    // Records which channels failed the last run and refreshes the retry command's state. Shared by
+    // the export and retry paths so this bookkeeping can't drift between them.
+    private void UpdateFailedChannels(IReadOnlyList<Channel> failed)
+    {
+        _lastFailedChannels = failed;
+        OnPropertyChanged(nameof(HasFailedExport));
+        RetryFailedExportCommand.NotifyCanExecuteChanged();
     }
 
     private bool CanRetryFailedExport() =>
@@ -718,9 +809,7 @@ public partial class DashboardViewModel : ViewModelBase
         {
             var exporter = new ChannelExporter(_discord);
             var failed = await RunExportCoreAsync(exporter, _lastExportSetup, _lastFailedChannels);
-            _lastFailedChannels = failed;
-            OnPropertyChanged(nameof(HasFailedExport));
-            RetryFailedExportCommand.NotifyCanExecuteChanged();
+            UpdateFailedChannels(failed);
         }
         catch (Exception ex)
         {
@@ -855,6 +944,11 @@ public partial class DashboardViewModel : ViewModelBase
                     string.Format(LocalizationManager.ContinueExportSuccessMessage, newMessages)
                 );
             }
+
+            // Keep the Library catalog in sync with the file we just grew, and remember its folder.
+            // Continue is the third write path and previously updated neither, leaving a stale
+            // message count and never surfacing continue-only folders.
+            await RefreshContinuedExportCatalogAsync(filePath, guild, channel, total);
         }
         catch (DiscordChatExporterException ex) when (!ex.IsFatal)
         {
@@ -911,7 +1005,7 @@ public partial class DashboardViewModel : ViewModelBase
             summary.SucceededChannels,
             summary.TotalMessages.ToString("N0", CultureInfo.CurrentCulture),
             summary.TotalAssets.ToString("N0", CultureInfo.CurrentCulture),
-            FormatBytes(summary.TotalBytes),
+            FileSize.FromBytes(summary.TotalBytes).ToString(),
             FormatDuration(summary.Duration)
         );
 
@@ -923,12 +1017,6 @@ public partial class DashboardViewModel : ViewModelBase
 
         return message;
     }
-
-    private static string FormatBytes(long bytes) =>
-        bytes >= 1024L * 1024 * 1024 ? $"{bytes / (1024.0 * 1024 * 1024):0.0} GB"
-        : bytes >= 1024L * 1024 ? $"{bytes / (1024.0 * 1024):0.0} MB"
-        : bytes >= 1024 ? $"{bytes / 1024.0:0.0} KB"
-        : $"{bytes} B";
 
     private static long SumFileSizes(IReadOnlyList<ExportedFile> files)
     {
