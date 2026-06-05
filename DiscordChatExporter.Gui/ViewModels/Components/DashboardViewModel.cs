@@ -1243,7 +1243,11 @@ public partial class DashboardViewModel : ViewModelBase
 
     public bool HasFailedExport => _lastFailedChannels.Count > 0;
 
-    private bool CanContinueExport() => !IsBusy && _discord is not null;
+    // Must be gated like Export (guild + channels selected), otherwise the Continue FAB floats into
+    // the Export FAB's slot whenever you're merely authenticated. Regressed twice now — see the
+    // DashboardCommandGatingTests guard.
+    private bool CanContinueExport() =>
+        !IsBusy && _discord is not null && SelectedGuild is not null && SelectedChannels.Any();
 
     [RelayCommand(CanExecute = nameof(CanContinueExport))]
     private async Task ContinueExportAsync()
