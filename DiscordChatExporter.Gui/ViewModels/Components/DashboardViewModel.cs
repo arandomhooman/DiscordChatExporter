@@ -838,13 +838,10 @@ public partial class DashboardViewModel : ViewModelBase
         if (_discord is null)
             return;
 
-        // Pick the existing export (JSON, HTML, or CSV)
-        var filePath = await _dialogManager.PromptSingleFilePathAsync([
-            new FilePickerFileType("Supported exports (JSON, HTML, CSV)")
-            {
-                Patterns = ["*.json", "*.html", "*.htm", "*.csv"],
-            },
-        ]);
+        // Pick the existing export (JSON, HTML, CSV, or SQLite)
+        var filePath = await _dialogManager.PromptSingleFilePathAsync(
+            CreateContinueExportFileTypes()
+        );
         if (string.IsNullOrWhiteSpace(filePath))
             return;
 
@@ -1050,6 +1047,14 @@ public partial class DashboardViewModel : ViewModelBase
         var sibling = Path.Combine(dir, $"{fileName} [part 2]{ext}");
         return File.Exists(sibling);
     }
+
+    private static IReadOnlyList<FilePickerFileType> CreateContinueExportFileTypes() =>
+        [
+            new FilePickerFileType("Supported exports (JSON, HTML, CSV, SQLite)")
+            {
+                Patterns = ["*.json", "*.html", "*.htm", "*.csv", "*.db"],
+            },
+        ];
 
     protected override void Dispose(bool disposing)
     {
