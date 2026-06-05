@@ -160,24 +160,24 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
 
-                <!--  Search-unavailable hint  -->
+                <!--  Search-unavailable hint (only when there ARE exports but none are .db)  -->
                 <TextBlock
                     Grid.Row="2"
                     Margin="16,12,16,4"
                     FontSize="12"
                     FontWeight="Light"
                     Foreground="{DynamicResource PrimaryHueMidBrush}"
-                    IsVisible="{Binding !HasSearchableExports}"
+                    IsVisible="{Binding ShowSearchUnavailable}"
                     Text="{Binding LocalizationManager.LibrarySearchUnavailableMessage}" />
 
-                <!--  Empty-results hint  -->
+                <!--  Empty-results hint (only after a non-blank search returned nothing)  -->
                 <TextBlock
                     Grid.Row="3"
                     Margin="16,8"
                     VerticalAlignment="Top"
                     FontSize="14"
                     FontWeight="Light"
-                    IsVisible="{Binding !SearchResults.Count}"
+                    IsVisible="{Binding ShowNoResults}"
                     Text="{Binding LocalizationManager.LibraryEmptyResultsMessage}" />
 
                 <!--  Results list  -->

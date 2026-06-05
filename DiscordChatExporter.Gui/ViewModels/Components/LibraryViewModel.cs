@@ -47,6 +47,21 @@ public partial class LibraryViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
+    // True once a non-blank search has run; gates the "no matching messages" empty state so it
+    // never shows before the user has actually searched.
+    [ObservableProperty]
+    public partial bool HasSearched { get; set; }
+
+    // Empty-state flags, kept mutually exclusive so only one hint ever renders:
+    //  - ShowNoResults: a non-blank search returned nothing.
+    //  - ShowSearchUnavailable: there are exports, but none are searchable (.db).
+    // (The "no exports catalogued" hint is driven directly off Entries.Count in XAML.)
+    [ObservableProperty]
+    public partial bool ShowNoResults { get; set; }
+
+    [ObservableProperty]
+    public partial bool ShowSearchUnavailable { get; set; }
+
     public override async Task InitializeAsync()
     {
         await ReloadAsync(_settingsService.KnownExportDirs);
@@ -65,6 +80,11 @@ public partial class LibraryViewModel : ViewModelBase
 
             HasSearchableExports = Entries.Any(IsSqlite);
             SearchResults.Clear();
+
+            // A reload/scan resets search state so stale empty-state hints don't linger.
+            HasSearched = false;
+            ShowNoResults = false;
+            ShowSearchUnavailable = Entries.Count > 0 && !HasSearchableExports;
         }
         finally
         {
@@ -97,10 +117,15 @@ public partial class LibraryViewModel : ViewModelBase
     private async Task SearchAsync()
     {
         SearchResults.Clear();
+        ShowNoResults = false;
 
         var query = SearchQuery;
         if (string.IsNullOrWhiteSpace(query))
+        {
+            // A blank query isn't a search; clear the flag so no "no results" hint shows.
+            HasSearched = false;
             return;
+        }
 
         var dbPaths = Entries.Where(IsSqlite).Select(e => e.File).ToArray();
 
@@ -116,6 +141,9 @@ public partial class LibraryViewModel : ViewModelBase
                 byFile.TryGetValue(hit.DatabaseFilePath, out var source);
                 SearchResults.Add(new LibrarySearchResult(hit, source));
             }
+
+            HasSearched = true;
+            ShowNoResults = SearchResults.Count == 0;
         }
         finally
         {
