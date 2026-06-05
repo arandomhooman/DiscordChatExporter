@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -71,6 +72,11 @@ internal class SqliteMessageWriter : MessageWriter
         """;
 
     private readonly string _databaseFilePath;
+
+    // The same author recurs across most messages; remember the ids we've already inserted so we
+    // don't issue an INSERT OR IGNORE round-trip per message (M inserts) when A distinct authors
+    // would do (A << M).
+    private readonly HashSet<string> _seenAuthorIds = new(StringComparer.Ordinal);
     private SqliteConnection? _connection;
     private SqliteTransaction? _transaction;
 
@@ -266,6 +272,10 @@ internal class SqliteMessageWriter : MessageWriter
 
     private async ValueTask WriteAuthorAsync(User user, CancellationToken cancellationToken)
     {
+        // Already inserted this author in this export; the row (deduped by id) is unchanged.
+        if (!_seenAuthorIds.Add(user.Id.ToString()))
+            return;
+
         using var command = _connection!.CreateCommand();
         command.Transaction = _transaction;
         // OR IGNORE dedupes by the author id primary key.
