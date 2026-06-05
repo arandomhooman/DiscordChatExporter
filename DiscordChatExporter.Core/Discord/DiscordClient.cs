@@ -186,6 +186,83 @@ public class DiscordClient(
             : null;
     }
 
+    private async ValueTask<(HttpStatusCode StatusCode, JsonElement? Json)> TryGetJsonResponseWithStatusAsync(
+        string url,
+        CancellationToken cancellationToken = default
+    )
+    {
+        using var response = await GetResponseAsync(url, cancellationToken);
+        return response.IsSuccessStatusCode
+            ? (response.StatusCode, await response.Content.ReadAsJsonAsync(cancellationToken))
+            : (response.StatusCode, null);
+    }
+
+    internal static long? TryParseMessageSearchTotal(
+        HttpStatusCode statusCode,
+        JsonElement? response
+    )
+    {
+        if (statusCode == HttpStatusCode.Accepted || response is null)
+            return null;
+
+        if ((int)statusCode is < 200 or >= 300)
+            return null;
+
+        try
+        {
+            return response.Value.TryGetProperty("total_results", out var totalResults)
+                && totalResults.ValueKind == JsonValueKind.Number
+                && totalResults.TryGetInt64(out var count)
+                ? count
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public async ValueTask<long?> CountMessagesAsync(
+        Channel channel,
+        Snowflake? after = null,
+        Snowflake? before = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (await ResolveTokenKindAsync(cancellationToken) != TokenKind.User)
+                return null;
+
+            var url = new UrlBuilder()
+                .SetPath(
+                    channel.IsDirect
+                        ? $"channels/{channel.Id}/messages/search"
+                        : $"guilds/{channel.GuildId}/messages/search"
+                )
+                .SetQueryParameter("channel_id", channel.IsDirect ? null : channel.Id.ToString())
+                .SetQueryParameter("min_id", (after ?? Snowflake.Zero).ToString())
+                .SetQueryParameter("max_id", before?.ToString())
+                .SetQueryParameter("limit", "1")
+                .Build();
+
+            var (statusCode, response) = await TryGetJsonResponseWithStatusAsync(
+                url,
+                cancellationToken
+            );
+
+            return TryParseMessageSearchTotal(statusCode, response);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async ValueTask<Application> GetApplicationAsync(
         CancellationToken cancellationToken = default
     )
