@@ -146,6 +146,26 @@ public class ExportCatalogBuilderSpecs : IDisposable
         dirs.Should().ContainSingle().Which.Should().Be(Path.Combine(_root, "nested", "deep"));
     }
 
+    [Fact]
+    public async Task Scan_finds_every_manifest_across_sibling_subtrees()
+    {
+        // Guards the EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true }
+        // walk: it must still surface ALL manifest-bearing dirs across separate branches, not just
+        // the first one it reaches.
+        await WriteManifestAsync("branchA/deep", "a.json", "alpha");
+        await WriteManifestAsync("branchB", "b.json", "beta");
+        await WriteManifestAsync("branchC/x/y", "c.json", "gamma");
+
+        var dirs = await ExportCatalogBuilder.ScanForExportDirsAsync(_root);
+
+        dirs.Should()
+            .BeEquivalentTo([
+                Path.Combine(_root, "branchA", "deep"),
+                Path.Combine(_root, "branchB"),
+                Path.Combine(_root, "branchC", "x", "y"),
+            ]);
+    }
+
     // Production-shape regression guard: a real .db sitting next to a manifest whose
     // ManifestEntry.File is the BARE filename "export.db" (exactly what ManifestBuilder writes
     // via Path.GetFileName). The catalog must resolve that to an ABSOLUTE path so the Library

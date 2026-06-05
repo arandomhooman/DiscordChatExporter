@@ -45,29 +45,44 @@ public static class ExportCatalogBuilder
     }
 
     // Returns the directories under rootDir (inclusive) that contain a manifest.json.
-    public static ValueTask<IReadOnlyList<string>> ScanForExportDirsAsync(
+    public static async ValueTask<IReadOnlyList<string>> ScanForExportDirsAsync(
         string rootDir,
         CancellationToken cancellationToken = default
     )
     {
         if (!Directory.Exists(rootDir))
-            return new ValueTask<IReadOnlyList<string>>([]);
+            return [];
 
-        try
-        {
-            var dirs = Directory
-                .EnumerateFiles(rootDir, ExportManifest.FileName, SearchOption.AllDirectories)
-                .Select(Path.GetDirectoryName)
-                .Where(d => !string.IsNullOrEmpty(d))
-                .Select(d => d!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+        // The recursive walk is synchronous and can be slow on a large/deep tree, so run it off
+        // the calling (UI) thread. IgnoreInaccessible skips protected subdirectories instead of
+        // throwing partway through and discarding every manifest found so far — the SearchOption
+        // overload defaults IgnoreInaccessible=false, which turned one locked subdir into an
+        // empty result for the whole scan.
+        return await Task.Run<IReadOnlyList<string>>(
+            () =>
+            {
+                try
+                {
+                    var options = new EnumerationOptions
+                    {
+                        RecurseSubdirectories = true,
+                        IgnoreInaccessible = true,
+                    };
 
-            return new ValueTask<IReadOnlyList<string>>(dirs);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return new ValueTask<IReadOnlyList<string>>([]);
-        }
+                    return Directory
+                        .EnumerateFiles(rootDir, ExportManifest.FileName, options)
+                        .Select(Path.GetDirectoryName)
+                        .Where(d => !string.IsNullOrEmpty(d))
+                        .Select(d => d!)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return [];
+                }
+            },
+            cancellationToken
+        );
     }
 }
