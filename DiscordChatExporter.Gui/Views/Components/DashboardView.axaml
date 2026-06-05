@@ -108,14 +108,35 @@
                 Height="2"
                 Background="Transparent"
                 IsIndeterminate="{Binding IsProgressIndeterminate}"
-                Value="{Binding Progress.Current.Fraction, Mode=OneWay}" />
-            <TextBlock
+                Value="{Binding DisplayedProgressFraction, Mode=OneWay}" />
+            <StackPanel
                 Margin="12,0,12,4"
                 HorizontalAlignment="Right"
-                FontSize="11"
-                Foreground="{DynamicResource MaterialDarkForegroundBrush}"
-                IsVisible="{Binding HasEta}"
-                Text="{Binding EtaText}" />
+                IsVisible="{Binding HasProgressDisplay}"
+                Orientation="Horizontal"
+                Spacing="8">
+                <TextBlock
+                    FontSize="11"
+                    Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                    Text="{Binding ChannelProgressText}" />
+                <TextBlock
+                    FontSize="11"
+                    Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                    Text="{Binding MessagesReadText}" />
+                <TextBlock
+                    FontSize="11"
+                    Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                    Text="{Binding RateText}" />
+                <TextBlock
+                    FontSize="11"
+                    Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                    Text="{Binding ExportedThroughText}" />
+                <TextBlock
+                    FontSize="11"
+                    Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                    IsVisible="{Binding HasEta}"
+                    Text="{Binding EtaText}" />
+            </StackPanel>
         </StackPanel>
 
         <!--  Body  -->

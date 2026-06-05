@@ -10,6 +10,10 @@ public partial class LocalizationManager
             // Dashboard
             [nameof(EtaEstimatingText)] = "estimating time remaining…",
             [nameof(EtaRemainingFormat)] = "~{0} left",
+            [nameof(MessagesReadFormat)] = "{0} messages",
+            [nameof(MessageRateFormat)] = "{0}/s",
+            [nameof(ExportedThroughFormat)] = "exported through {0}",
+            [nameof(ChannelProgressFormat)] = "Channel {0} of {1}",
             [nameof(ExportCatalogWriteFailedMessage)] =
                 "Export finished, but the catalog (manifest.json) could not be updated.",
             [nameof(ExportSummaryMessage)] =

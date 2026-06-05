@@ -47,6 +47,16 @@ public partial class DashboardViewModel : ViewModelBase
     private readonly IDisposable _eventSubscription;
     private readonly AutoResetProgressMuxer _progressMuxer;
     private readonly EtaEstimator _etaEstimator = new();
+    private readonly object _exportProgressLock = new();
+
+    private long?[] _estimatedMessagesByChannel = [];
+    private long[] _messagesReadByChannel = [];
+    private DateTimeOffset?[] _currentTimestampByChannel = [];
+    private bool[] _completedChannels = [];
+    private long _lastRateMessagesRead;
+    private double _messageRate;
+    private DateTimeOffset? _lastRateUpdate;
+    private bool _isExportProgressRunActive;
 
     private DiscordClient? _discord;
 
@@ -75,6 +85,9 @@ public partial class DashboardViewModel : ViewModelBase
                 _ =>
                     Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                     {
+                        if (!_isExportProgressRunActive || !HasCompleteCountEstimate())
+                            DisplayedProgressFraction = Progress.Current.Fraction;
+
                         OnPropertyChanged(nameof(IsProgressIndeterminate));
                         UpdateEta();
                     })
@@ -104,15 +117,48 @@ public partial class DashboardViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasEta))]
+    [NotifyPropertyChangedFor(nameof(HasProgressDisplay))]
     public partial string? EtaText { get; set; }
 
     public bool HasEta => !string.IsNullOrEmpty(EtaText);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsProgressIndeterminate))]
+    public partial double DisplayedProgressFraction { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasProgressStatus))]
+    [NotifyPropertyChangedFor(nameof(HasProgressDisplay))]
+    public partial string? MessagesReadText { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasProgressStatus))]
+    [NotifyPropertyChangedFor(nameof(HasProgressDisplay))]
+    public partial string? RateText { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasProgressStatus))]
+    [NotifyPropertyChangedFor(nameof(HasProgressDisplay))]
+    public partial string? ExportedThroughText { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasProgressStatus))]
+    [NotifyPropertyChangedFor(nameof(HasProgressDisplay))]
+    public partial string? ChannelProgressText { get; set; }
+
+    public bool HasProgressStatus =>
+        !string.IsNullOrEmpty(MessagesReadText)
+        || !string.IsNullOrEmpty(RateText)
+        || !string.IsNullOrEmpty(ExportedThroughText)
+        || !string.IsNullOrEmpty(ChannelProgressText);
+
+    public bool HasProgressDisplay => HasProgressStatus || HasEta;
 
     public LocalizationManager LocalizationManager { get; }
 
     public ProgressContainer<Percentage> Progress { get; } = new();
 
-    public bool IsProgressIndeterminate => IsBusy && Progress.Current.Fraction is <= 0 or >= 1;
+    public bool IsProgressIndeterminate => IsBusy && DisplayedProgressFraction is <= 0 or >= 1;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(PullGuildsCommand))]
@@ -346,8 +392,208 @@ public partial class DashboardViewModel : ViewModelBase
         await clipboard.SetTextAsync(text);
     }
 
-    private static IProgress<ExportProgress> ToExportProgress(IProgress<Percentage> progress) =>
-        new System.Progress<ExportProgress>(p => progress.Report(p.Fraction));
+    private void ResetExportProgressDisplay()
+    {
+        lock (_exportProgressLock)
+        {
+            _estimatedMessagesByChannel = [];
+            _messagesReadByChannel = [];
+            _currentTimestampByChannel = [];
+            _completedChannels = [];
+            _lastRateMessagesRead = 0;
+            _messageRate = 0;
+            _lastRateUpdate = null;
+            _isExportProgressRunActive = false;
+        }
+
+        _etaEstimator.Reset();
+        DisplayedProgressFraction = 0;
+        EtaText = null;
+        MessagesReadText = null;
+        RateText = null;
+        ExportedThroughText = null;
+        ChannelProgressText = null;
+    }
+
+    private void StartExportProgressRun(IReadOnlyList<long?> estimatedMessagesByChannel)
+    {
+        lock (_exportProgressLock)
+        {
+            _estimatedMessagesByChannel = estimatedMessagesByChannel.ToArray();
+            _messagesReadByChannel = new long[_estimatedMessagesByChannel.Length];
+            _currentTimestampByChannel = new DateTimeOffset?[_estimatedMessagesByChannel.Length];
+            _completedChannels = new bool[_estimatedMessagesByChannel.Length];
+            _lastRateMessagesRead = 0;
+            _messageRate = 0;
+            _lastRateUpdate = null;
+            _isExportProgressRunActive = true;
+        }
+
+        DisplayedProgressFraction = 0;
+    }
+
+    private async Task<long?[]> EstimateMessageTotalsAsync(IReadOnlyList<ExportRequest> requests)
+    {
+        var totals = new long?[requests.Count];
+        if (_discord is null)
+            return totals;
+
+        for (var i = 0; i < requests.Count; i++)
+        {
+            var request = requests[i];
+            var total =
+                await _discord.CountMessagesAsync(request.Channel, request.After, request.Before)
+                ?? await _discord.EstimateMessageCountByDensityAsync(
+                    request.Channel,
+                    request.After,
+                    request.Before
+                );
+
+            totals[i] = total is > 0 ? total : null;
+        }
+
+        return totals;
+    }
+
+    private IProgress<ExportProgress> CreateExportProgressInput(
+        int index,
+        IProgress<Percentage> fallbackProgress
+    ) =>
+        new System.Progress<ExportProgress>(progress =>
+        {
+            fallbackProgress.Report(progress.Fraction);
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                ApplyExportProgress(index, progress)
+            );
+        });
+
+    private bool HasCompleteCountEstimate()
+    {
+        lock (_exportProgressLock)
+        {
+            return _estimatedMessagesByChannel.Length > 0
+                && _estimatedMessagesByChannel.All(t => t is > 0);
+        }
+    }
+
+    private (long MessagesRead, long? EstimatedTotal, DateTimeOffset? CurrentTimestamp) SnapshotExportProgress()
+    {
+        lock (_exportProgressLock)
+        {
+            var messagesRead = _messagesReadByChannel.Sum();
+            var estimatedTotal = _estimatedMessagesByChannel.All(t => t is > 0)
+                ? _estimatedMessagesByChannel.Sum(t => t!.Value)
+                : (long?)null;
+            var currentTimestamp = _currentTimestampByChannel.LastOrDefault(t => t is not null);
+            return (messagesRead, estimatedTotal, currentTimestamp);
+        }
+    }
+
+    private void ApplyExportProgress(int index, ExportProgress progress)
+    {
+        lock (_exportProgressLock)
+        {
+            if (index >= _messagesReadByChannel.Length)
+                return;
+
+            _messagesReadByChannel[index] = Math.Max(
+                _messagesReadByChannel[index],
+                progress.MessagesRead
+            );
+            _currentTimestampByChannel[index] = progress.CurrentTimestamp;
+        }
+
+        var (messagesRead, estimatedTotal, currentTimestamp) = SnapshotExportProgress();
+        UpdateRate(messagesRead, DateTimeOffset.Now);
+
+        if (estimatedTotal is > 0)
+        {
+            var correctedTotal = Math.Max(estimatedTotal.Value, messagesRead);
+            var countFraction = correctedTotal > 0 ? (double)messagesRead / correctedTotal : 0;
+            DisplayedProgressFraction = Math.Max(
+                DisplayedProgressFraction,
+                Math.Clamp(countFraction, 0, 1)
+            );
+        }
+        else
+        {
+            DisplayedProgressFraction = progress.Fraction.Fraction;
+        }
+
+        UpdateProgressStatusText(messagesRead, currentTimestamp);
+        UpdateEta();
+    }
+
+    private void MarkExportProgressCompleted(int index)
+    {
+        lock (_exportProgressLock)
+        {
+            if (index < _completedChannels.Length)
+                _completedChannels[index] = true;
+        }
+
+        UpdateProgressStatusText(SnapshotExportProgress().MessagesRead, null);
+    }
+
+    private void UpdateRate(long messagesRead, DateTimeOffset now)
+    {
+        if (_lastRateUpdate is { } previousTime)
+        {
+            var elapsed = (now - previousTime).TotalSeconds;
+            var delta = messagesRead - _lastRateMessagesRead;
+            if (elapsed > 0 && delta > 0)
+            {
+                var instantRate = delta / elapsed;
+                var alpha = 1 - Math.Exp(-elapsed / 5);
+                _messageRate =
+                    _messageRate <= 0
+                        ? instantRate
+                        : _messageRate + alpha * (instantRate - _messageRate);
+            }
+        }
+
+        _lastRateUpdate = now;
+        _lastRateMessagesRead = messagesRead;
+    }
+
+    private void UpdateProgressStatusText(long messagesRead, DateTimeOffset? currentTimestamp)
+    {
+        MessagesReadText =
+            messagesRead > 0
+                ? string.Format(
+                    LocalizationManager.MessagesReadFormat,
+                    messagesRead.ToString("N0", CultureInfo.CurrentCulture)
+                )
+                : null;
+
+        RateText =
+            _messageRate > 0
+                ? string.Format(
+                    LocalizationManager.MessageRateFormat,
+                    _messageRate.ToString("N0", CultureInfo.CurrentCulture)
+                )
+                : null;
+
+        if (currentTimestamp is not null)
+        {
+            ExportedThroughText = string.Format(
+                LocalizationManager.ExportedThroughFormat,
+                currentTimestamp.Value.ToString("MMM yyyy", CultureInfo.CurrentCulture)
+            );
+        }
+
+        lock (_exportProgressLock)
+        {
+            ChannelProgressText =
+                _completedChannels.Length > 1
+                    ? string.Format(
+                        LocalizationManager.ChannelProgressFormat,
+                        Math.Min(_completedChannels.Count(c => c) + 1, _completedChannels.Length),
+                        _completedChannels.Length
+                    )
+                    : null;
+        }
+    }
 
     private async ValueTask CopyUserMessagesAsync(
         ExportSetupViewModel dialog,
@@ -378,7 +624,8 @@ public partial class DashboardViewModel : ViewModelBase
                 _settingsService.IsUtcNormalizationEnabled
             );
 
-            await exporter.ExportChannelAsync(request, ToExportProgress(progress));
+            StartExportProgressRun(await EstimateMessageTotalsAsync([request]));
+            await exporter.ExportChannelAsync(request, CreateExportProgressInput(0, progress));
 
             var text = await File.ReadAllTextAsync(outputPath);
             var user = dialog.CopyUserMessagesUserValue?.Trim();
@@ -400,6 +647,7 @@ public partial class DashboardViewModel : ViewModelBase
         }
         finally
         {
+            MarkExportProgressCompleted(0);
             progress.ReportCompletion();
 
             try
@@ -417,7 +665,7 @@ public partial class DashboardViewModel : ViewModelBase
     private async Task ExportAsync()
     {
         IsBusy = true;
-        _etaEstimator.Reset();
+        ResetExportProgressDisplay();
 
         try
         {
@@ -668,13 +916,17 @@ public partial class DashboardViewModel : ViewModelBase
         }
 
         var pairs = toExport
-            .Select(r => new
+            .Select((r, index) => new
             {
+                Index = index,
                 r.Channel,
                 r.Request,
                 Progress = _progressMuxer.CreateInput(),
             })
             .ToArray();
+        StartExportProgressRun(
+            await EstimateMessageTotalsAsync(pairs.Select(p => p.Request).ToArray())
+        );
 
         var exportStats = new ConcurrentBag<ChannelExportStats>();
         var failedChannels = new ConcurrentBag<Channel>();
@@ -698,7 +950,7 @@ public partial class DashboardViewModel : ViewModelBase
                 {
                     var result = await exporter.ExportChannelAsync(
                         request,
-                        ToExportProgress(progress),
+                        CreateExportProgressInput(pair.Index, progress),
                         cancellationToken
                     );
 
@@ -755,6 +1007,7 @@ public partial class DashboardViewModel : ViewModelBase
                 }
                 finally
                 {
+                    MarkExportProgressCompleted(pair.Index);
                     progress.ReportCompletion();
                 }
             }
@@ -811,7 +1064,7 @@ public partial class DashboardViewModel : ViewModelBase
             return;
 
         IsBusy = true;
-        _etaEstimator.Reset();
+        ResetExportProgressDisplay();
 
         try
         {
@@ -872,7 +1125,7 @@ public partial class DashboardViewModel : ViewModelBase
         }
 
         IsBusy = true;
-        _etaEstimator.Reset();
+        ResetExportProgressDisplay();
         var progress = _progressMuxer.CreateInput();
         var tempPath = Path.Combine(
             Path.GetTempPath(),
@@ -918,7 +1171,8 @@ public partial class DashboardViewModel : ViewModelBase
 
             try
             {
-                await exporter.ExportChannelAsync(request, ToExportProgress(progress));
+                StartExportProgressRun(await EstimateMessageTotalsAsync([request]));
+                await exporter.ExportChannelAsync(request, CreateExportProgressInput(0, progress));
             }
             catch (ChannelEmptyException)
             {
@@ -972,6 +1226,7 @@ public partial class DashboardViewModel : ViewModelBase
         }
         finally
         {
+            MarkExportProgressCompleted(0);
             progress.ReportCompletion();
             IsBusy = false;
             EtaText = null;
@@ -993,7 +1248,7 @@ public partial class DashboardViewModel : ViewModelBase
             EtaText = null;
             return;
         }
-        _etaEstimator.Report(Progress.Current.Fraction, DateTimeOffset.Now);
+        _etaEstimator.Report(DisplayedProgressFraction, DateTimeOffset.Now);
         var estimate = _etaEstimator.Estimate;
         EtaText =
             estimate is null ? LocalizationManager.EtaEstimatingText
