@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exceptions;
+using DiscordChatExporter.Core.Exporting.Progress;
 using DiscordChatExporter.Core.Utils;
 using Gress;
 using JsonExtensions.Http;
@@ -704,6 +705,117 @@ public class DiscordClient(
 
         var response = await GetJsonResponseAsync(url, cancellationToken);
         return response.EnumerateArray().Select(Message.Parse).LastOrDefault();
+    }
+
+    private async ValueTask<IReadOnlyList<Message>> GetMessageProbePageAfterAsync(
+        Snowflake channelId,
+        Snowflake after,
+        Snowflake? before = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var url = new UrlBuilder()
+            .SetPath($"channels/{channelId}/messages")
+            .SetQueryParameter("limit", MessageCountEstimator.PageSize.ToString())
+            .SetQueryParameter("after", after.ToString())
+            .SetQueryParameter("before", before?.ToString())
+            .Build();
+
+        var response = await GetJsonResponseAsync(url, cancellationToken);
+        return response
+            .EnumerateArray()
+            .Select(Message.Parse)
+            .Reverse()
+            .ToArray();
+    }
+
+    private static MessageDensitySample? TryCreateDensitySample(IReadOnlyList<Message> page)
+    {
+        if (page.Count < 2)
+            return null;
+
+        var span = (page[^1].Timestamp - page[0].Timestamp).Duration().TotalSeconds;
+        return span > 0
+            ? new MessageDensitySample(page[0].Timestamp, page.Count / span)
+            : null;
+    }
+
+    public async ValueTask<long?> EstimateMessageCountByDensityAsync(
+        Channel channel,
+        Snowflake? after = null,
+        Snowflake? before = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var firstPage = await GetMessageProbePageAfterAsync(
+                channel.Id,
+                after ?? Snowflake.Zero,
+                before,
+                cancellationToken
+            );
+
+            if (firstPage.Count == 0)
+                return 0;
+
+            var lastMessage = await TryGetLastMessageAsync(channel.Id, before, cancellationToken);
+            if (lastMessage is null || lastMessage.Timestamp < firstPage[0].Timestamp)
+                return firstPage.Count;
+
+            var hasMoreMessages = firstPage[^1].Id != lastMessage.Id;
+            if (!MessageCountEstimator.ShouldEstimate(firstPage.Count, hasMoreMessages))
+                return firstPage.Count;
+
+            var samples = new List<MessageDensitySample>();
+            if (TryCreateDensitySample(firstPage) is { } firstSample)
+                samples.Add(firstSample);
+
+            const int sampleCount = 10;
+            var start = firstPage[0].Timestamp;
+            var end = lastMessage.Timestamp;
+            var duration = end - start;
+
+            for (var i = 1; i < sampleCount - 1; i++)
+            {
+                var fraction = i / (double)(sampleCount - 1);
+                var sampleTime = start + duration * fraction;
+                var page = await GetMessageProbePageAfterAsync(
+                    channel.Id,
+                    Snowflake.FromDate(sampleTime),
+                    before,
+                    cancellationToken
+                );
+
+                if (TryCreateDensitySample(page) is { } sample)
+                    samples.Add(sample);
+            }
+
+            if (
+                TryCreateDensitySample(
+                    await GetMessageProbePageAfterAsync(
+                        channel.Id,
+                        Snowflake.FromDate(end - TimeSpan.FromSeconds(1)),
+                        before,
+                        cancellationToken
+                    )
+                ) is { } lastSample
+            )
+            {
+                samples.Add(lastSample);
+            }
+
+            var estimated = MessageCountEstimator.EstimateTotal(start, end, samples);
+            return estimated is not null ? Math.Max(firstPage.Count, estimated.Value) : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public async IAsyncEnumerable<Message> GetMessagesAsync(
