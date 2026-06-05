@@ -14,6 +14,7 @@ public partial class LocalizationManager
             [nameof(MessageRateFormat)] = "{0}/s",
             [nameof(ExportedThroughFormat)] = "exported through {0}",
             [nameof(ChannelProgressFormat)] = "Channel {0} of {1}",
+            [nameof(RateLimitPauseFormat)] = "Rate limited - resuming in {0}s",
             [nameof(ExportCatalogWriteFailedMessage)] =
                 "Export finished, but the catalog (manifest.json) could not be updated.",
             [nameof(ExportSummaryMessage)] =

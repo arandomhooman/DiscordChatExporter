@@ -78,6 +78,7 @@ public partial class LocalizationManager
     public string MessageRateFormat => Get();
     public string ExportedThroughFormat => Get();
     public string ChannelProgressFormat => Get();
+    public string RateLimitPauseFormat => Get();
     public string ExportCatalogWriteFailedMessage => Get();
     public string ExportSummaryMessage => Get();
     public string ExportSummaryFailedSuffix => Get();

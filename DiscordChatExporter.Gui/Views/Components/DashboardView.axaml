@@ -117,6 +117,10 @@
                 Spacing="8">
                 <TextBlock
                     FontSize="11"
+                    Foreground="{DynamicResource MaterialValidationErrorBrush}"
+                    Text="{Binding RateLimitPauseText}" />
+                <TextBlock
+                    FontSize="11"
                     Foreground="{DynamicResource MaterialDarkForegroundBrush}"
                     Text="{Binding ChannelProgressText}" />
                 <TextBlock

@@ -146,19 +146,28 @@ public partial class DashboardViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(HasProgressDisplay))]
     public partial string? ChannelProgressText { get; set; }
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsProgressIndeterminate))]
+    [NotifyPropertyChangedFor(nameof(IsRateLimitPaused))]
+    [NotifyPropertyChangedFor(nameof(HasProgressDisplay))]
+    public partial string? RateLimitPauseText { get; set; }
+
     public bool HasProgressStatus =>
         !string.IsNullOrEmpty(MessagesReadText)
         || !string.IsNullOrEmpty(RateText)
         || !string.IsNullOrEmpty(ExportedThroughText)
         || !string.IsNullOrEmpty(ChannelProgressText);
 
-    public bool HasProgressDisplay => HasProgressStatus || HasEta;
+    public bool IsRateLimitPaused => !string.IsNullOrEmpty(RateLimitPauseText);
+
+    public bool HasProgressDisplay => HasProgressStatus || HasEta || IsRateLimitPaused;
 
     public LocalizationManager LocalizationManager { get; }
 
     public ProgressContainer<Percentage> Progress { get; } = new();
 
-    public bool IsProgressIndeterminate => IsBusy && DisplayedProgressFraction is <= 0 or >= 1;
+    public bool IsProgressIndeterminate =>
+        IsBusy && (IsRateLimitPaused || DisplayedProgressFraction is <= 0 or >= 1);
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(PullGuildsCommand))]
@@ -207,6 +216,30 @@ public partial class DashboardViewModel : ViewModelBase
         return Task.CompletedTask;
     }
 
+    private void SetDiscordClient(DiscordClient discord)
+    {
+        if (_discord is not null)
+            _discord.RateLimitChanged -= HandleRateLimitChanged;
+
+        _discord = discord;
+        _discord.RateLimitChanged += HandleRateLimitChanged;
+    }
+
+    private void HandleRateLimitChanged(object? sender, RateLimitState state)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            RateLimitPauseText = state.IsPaused
+                ? string.Format(
+                    LocalizationManager.RateLimitPauseFormat,
+                    Math.Ceiling(state.Remaining.TotalSeconds).ToString("N0", CultureInfo.CurrentCulture)
+                )
+                : null;
+
+            OnPropertyChanged(nameof(IsProgressIndeterminate));
+        });
+    }
+
     [RelayCommand]
     private async Task ShowSettingsAsync() =>
         await _dialogManager.ShowDialogAsync(_viewModelManager.GetSettingsViewModel());
@@ -241,10 +274,11 @@ public partial class DashboardViewModel : ViewModelBase
             AvailableChannels = null;
             SelectedChannels.Clear();
 
-            _discord = new DiscordClient(token, _settingsService.RateLimitPreference);
+            var discord = new DiscordClient(token, _settingsService.RateLimitPreference);
+            SetDiscordClient(discord);
             _settingsService.LastToken = token;
 
-            var guilds = await _discord.GetUserGuildsAsync();
+            var guilds = await discord.GetUserGuildsAsync();
 
             AvailableGuilds = guilds;
             SelectedGuild = guilds.FirstOrDefault();
@@ -413,6 +447,7 @@ public partial class DashboardViewModel : ViewModelBase
         RateText = null;
         ExportedThroughText = null;
         ChannelProgressText = null;
+        RateLimitPauseText = null;
     }
 
     private void StartExportProgressRun(IReadOnlyList<long?> estimatedMessagesByChannel)
@@ -1329,6 +1364,9 @@ public partial class DashboardViewModel : ViewModelBase
     {
         if (disposing)
         {
+            if (_discord is not null)
+                _discord.RateLimitChanged -= HandleRateLimitChanged;
+
             _eventSubscription.Dispose();
         }
 

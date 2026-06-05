@@ -27,6 +27,8 @@ public class DiscordClient(
     private readonly Uri _baseUri = new("https://discord.com/api/v10/", UriKind.Absolute);
     private TokenKind? _resolvedTokenKind;
 
+    public event EventHandler<RateLimitState>? RateLimitChanged;
+
     private async ValueTask<HttpResponseMessage> GetResponseAsync(
         string url,
         TokenKind tokenKind,
@@ -84,7 +86,18 @@ public class DiscordClient(
                             // is not actually enforced by the server. So we cap it at a reasonable value.
                             .Clamp(TimeSpan.Zero, TimeSpan.FromSeconds(60));
 
-                        await Task.Delay(delay, innerCancellationToken);
+                        RateLimitChanged?.Invoke(this, new RateLimitState(true, delay));
+                        try
+                        {
+                            await Task.Delay(delay, innerCancellationToken);
+                        }
+                        finally
+                        {
+                            RateLimitChanged?.Invoke(
+                                this,
+                                new RateLimitState(false, TimeSpan.Zero)
+                            );
+                        }
                     }
                 }
 
