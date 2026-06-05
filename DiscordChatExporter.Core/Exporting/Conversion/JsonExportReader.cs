@@ -231,11 +231,16 @@ public static class JsonExportReader
         new(ParseEmoji(json.GetProperty("emoji")), GetInt32(json, "count"));
 
     private static Emoji ParseEmoji(JsonElement json) =>
-        new(
-            GetStringOrNull(json, "id") is { } id ? ParseSnowflake(id) : null,
+        new Emoji(
+            GetStringOrNull(json, "id") is { } id && !string.IsNullOrWhiteSpace(id)
+                ? ParseSnowflake(id)
+                : null,
             GetString(json, "name"),
             GetBoolean(json, "isAnimated")
-        );
+        )
+        {
+            ImageUrlOverride = GetStringOrNull(json, "imageUrl"),
+        };
 
     private static MessageReference ParseMessageReference(JsonElement json) =>
         new(

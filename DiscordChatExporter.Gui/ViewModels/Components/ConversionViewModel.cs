@@ -96,16 +96,34 @@ public sealed partial class ConversionViewModel(
         {
             foreach (var sourcePath in SourceFilePaths)
             {
-                var hasConversionData =
-                    (await JsonExportReader.ParseAsync(sourcePath)).ConversionData is not null;
+                bool hasConversionData;
+                try
+                {
+                    hasConversionData =
+                        (await JsonExportReader.ParseAsync(sourcePath)).ConversionData is not null;
+                }
+                catch (Exception ex)
+                {
+                    foreach (var format in GetTargetFormats())
+                    {
+                        Results.Add(
+                            new ConversionResultRow(
+                                sourcePath,
+                                GetOutputPath(sourcePath, format),
+                                format,
+                                false,
+                                false,
+                                ex.Message
+                            )
+                        );
+                    }
+
+                    continue;
+                }
+
                 foreach (var format in GetTargetFormats())
                 {
-                    var outputPath = Path.Combine(
-                        OutputFolderPath,
-                        Path.GetFileNameWithoutExtension(sourcePath)
-                            + "."
-                            + format.GetFileExtension()
-                    );
+                    var outputPath = GetOutputPath(sourcePath, format);
 
                     try
                     {
@@ -158,6 +176,22 @@ public sealed partial class ConversionViewModel(
             yield return ExportFormat.PlainText;
         if (IsSqliteSelected)
             yield return ExportFormat.Db;
+    }
+
+    private string GetOutputPath(string sourcePath, ExportFormat format)
+    {
+        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(sourcePath);
+        var formatSuffix = format switch
+        {
+            ExportFormat.HtmlDark => ".dark",
+            ExportFormat.HtmlLight => ".light",
+            _ => "",
+        };
+
+        return Path.Combine(
+            OutputFolderPath ?? "",
+            fileNameWithoutExtension + formatSuffix + "." + format.GetFileExtension()
+        );
     }
 }
 

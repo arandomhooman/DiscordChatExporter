@@ -919,10 +919,13 @@ public partial class DashboardViewModel : ViewModelBase
             }
             catch (ChannelEmptyException)
             {
-                _snackbarManager.Notify(
-                    LocalizationManager.ContinueExportUpToDateMessage.TrimEnd('.')
-                );
-                return;
+                if (ContinuationFormat.FormatFor(filePath) is not ExportFormat.Db)
+                {
+                    _snackbarManager.Notify(
+                        LocalizationManager.ContinueExportUpToDateMessage.TrimEnd('.')
+                    );
+                    return;
+                }
             }
 
             var countBefore = cutoff.ExistingCount;

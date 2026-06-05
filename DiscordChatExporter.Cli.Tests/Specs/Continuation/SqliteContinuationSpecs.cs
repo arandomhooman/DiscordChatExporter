@@ -220,6 +220,41 @@ public class SqliteContinuationSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Merger_refreshes_metadata_when_incoming_database_is_empty()
+    {
+        var existing = await WriteDbAsync("chat.db", (1001, "a"), (1002, "b"));
+        var incoming = await WriteDbAsync("empty.db");
+        var cutoff = await SqliteExportInspector.InspectAsync(existing);
+        var exportedAt = DateTimeOffset.UnixEpoch.AddDays(1);
+
+        var total = await SqliteExportMerger.MergeAsync(existing, incoming, cutoff, exportedAt);
+
+        total.Should().Be(2);
+        using var connection = OpenReadOnly(existing);
+        Count(connection, "SELECT COUNT(*) FROM messages;").Should().Be(2);
+        using var query = connection.CreateCommand();
+        query.CommandText = "SELECT exported_at FROM export_info;";
+        ((string)query.ExecuteScalar()!).Should().Be(exportedAt.ToString("o"));
+    }
+
+    [Fact]
+    public async Task Inspector_rejects_malformed_sqlite_metadata()
+    {
+        var path = await WriteDbAsync("chat.db", (1001, "a"));
+        await using (var connection = new SqliteConnection($"Data Source={path};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE export_info SET channel_id = 'not-a-snowflake';";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var act = async () => await SqliteExportInspector.InspectAsync(path);
+
+        await act.Should().ThrowAsync<InvalidExportException>();
+    }
+
+    [Fact]
     public void ContinuationFormat_supports_sqlite_exports()
     {
         ContinuationFormat.IsSupportedExtension("chat.db").Should().BeTrue();

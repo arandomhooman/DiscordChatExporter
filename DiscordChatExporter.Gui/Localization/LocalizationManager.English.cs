@@ -28,7 +28,7 @@ public partial class LocalizationManager
             [nameof(SelectAllChannelsButton)] = "Select all",
             [nameof(DeselectAllChannelsButton)] = "Deselect all",
             [nameof(ContinueExportTooltip)] =
-                "Continue an existing JSON, HTML, or CSV export (add new messages)",
+                "Continue an existing JSON, HTML, CSV, or SQLite export (add new messages)",
             [nameof(ContinueExportUpToDateMessage)] = "That export is already up to date.",
             [nameof(ContinueExportSuccessMessage)] = "Added {0} new message(s).",
             [nameof(ContinueExportReverseUnsupportedMessage)] =
@@ -36,7 +36,7 @@ public partial class LocalizationManager
             [nameof(ContinueExportPartitionedUnsupportedMessage)] =
                 "Continuing partitioned exports is not supported.",
             [nameof(ContinueExportFormatUnsupportedMessage)] =
-                "Continuing this file type is not supported (JSON, HTML, and CSV are).",
+                "Continuing this file type is not supported (JSON, HTML, CSV, and SQLite are).",
             [nameof(SettingsTooltip)] = "Settings",
             [nameof(LibraryTooltip)] = "Library",
             [nameof(ConversionTooltip)] = "Convert JSON exports",

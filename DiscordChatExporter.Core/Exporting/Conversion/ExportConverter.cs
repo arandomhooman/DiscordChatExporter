@@ -1,6 +1,8 @@
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
+using DiscordChatExporter.Core.Exporting.Continuation;
 using DiscordChatExporter.Core.Exporting.Filtering;
 using DiscordChatExporter.Core.Exporting.Partitioning;
 
@@ -15,7 +17,11 @@ public static class ExportConverter
         CancellationToken cancellationToken = default
     )
     {
+        if (targetFormat is ExportFormat.Json)
+            throw new InvalidExportException("JSON is not a supported conversion target.");
+
         var parsed = await JsonExportReader.ParseAsync(jsonFilePath, cancellationToken);
+        var referencedUsers = parsed.Messages.SelectMany(m => m.GetReferencedUsers()).ToArray();
         var request = new ExportRequest(
             parsed.Guild,
             parsed.Channel,
@@ -34,9 +40,9 @@ public static class ExportConverter
             isUtcNormalizationEnabled: true
         );
 
-        var context = new ExportContext(new DiscordClient("conversion-offline"), request);
+        var context = new ExportContext(new DiscordClient("conversion-offline"), request, true);
         if (parsed.ConversionData is not null)
-            context.SeedFromConversionData(parsed.ConversionData);
+            context.SeedFromConversionData(parsed.ConversionData, referencedUsers);
 
         var exporter = new MessageExporter(context);
         try
@@ -44,6 +50,9 @@ public static class ExportConverter
             foreach (var message in parsed.Messages)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                foreach (var user in message.GetReferencedUsers())
+                    await context.PopulateMemberAsync(user, cancellationToken);
+
                 await exporter.ExportMessageAsync(message, cancellationToken);
             }
         }

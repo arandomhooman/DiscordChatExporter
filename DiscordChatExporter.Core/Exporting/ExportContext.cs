@@ -15,7 +15,7 @@ using PowerKit.Extensions;
 
 namespace DiscordChatExporter.Core.Exporting;
 
-internal class ExportContext(DiscordClient discord, ExportRequest request)
+internal class ExportContext(DiscordClient discord, ExportRequest request, bool isOffline = false)
 {
     private readonly Dictionary<Snowflake, Member?> _membersById = new();
     private readonly Dictionary<Snowflake, Channel?> _channelsById = new();
@@ -29,6 +29,8 @@ internal class ExportContext(DiscordClient discord, ExportRequest request)
     public DiscordClient Discord { get; } = discord;
 
     public ExportRequest Request { get; } = request;
+
+    public bool IsOffline { get; } = isOffline;
 
     public int DownloadedAssetCount => _assetDownloader.DownloadedAssetCount;
 
@@ -70,6 +72,12 @@ internal class ExportContext(DiscordClient discord, ExportRequest request)
         if (_channelsById.ContainsKey(id))
             return;
 
+        if (IsOffline)
+        {
+            _channelsById[id] = null;
+            return;
+        }
+
         var channel = await Discord.TryGetChannelAsync(id, cancellationToken);
 
         // Store the result even if it's null, to avoid re-fetching non-existing channels
@@ -85,6 +93,12 @@ internal class ExportContext(DiscordClient discord, ExportRequest request)
     {
         if (_membersById.ContainsKey(id))
             return;
+
+        if (IsOffline)
+        {
+            _membersById[id] = fallbackUser is not null ? Member.CreateFallback(fallbackUser) : null;
+            return;
+        }
 
         var member = await Discord.TryGetGuildMemberAsync(Request.Guild.Id, id, cancellationToken);
 
@@ -130,8 +144,14 @@ internal class ExportContext(DiscordClient discord, ExportRequest request)
     public Color? TryGetUserColor(Snowflake id) =>
         GetUserRoles(id).Where(r => r.Color is not null).Select(r => r.Color).FirstOrDefault();
 
-    public void SeedFromConversionData(ConversionData data)
+    public void SeedFromConversionData(
+        ConversionData data,
+        IEnumerable<User>? fallbackUsers = null
+    )
     {
+        var fallbackUsersById =
+            fallbackUsers?.GroupBy(u => u.Id).ToDictionary(g => g.Key, g => g.First()) ?? [];
+
         foreach (var role in data.Roles)
         {
             var id = ParseSnowflake(role.Id);
@@ -159,15 +179,16 @@ internal class ExportContext(DiscordClient discord, ExportRequest request)
         {
             var id = ParseSnowflake(member.Id);
             var roleIds = member.RoleIds.Select(ParseSnowflake).ToArray();
+            var avatarUrl = fallbackUsersById.GetValueOrDefault(id)?.AvatarUrl ?? member.AvatarUrl ?? "";
             var user = new User(
                 id,
                 false,
                 null,
                 member.DisplayName,
                 member.DisplayName,
-                member.AvatarUrl ?? ""
+                avatarUrl
             );
-            _membersById[id] = new Member(user, member.DisplayName, member.AvatarUrl, roleIds);
+            _membersById[id] = new Member(user, member.DisplayName, avatarUrl, roleIds);
         }
     }
 

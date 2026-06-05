@@ -206,4 +206,77 @@ public sealed class JsonExportReaderSpecs : IDisposable
 
         (await JsonExportReader.ParseAsync(legacyPath)).ConversionData.Should().BeNull();
     }
+
+    [Fact]
+    public async Task Reader_parses_standard_emoji_reactions_without_a_snowflake_id()
+    {
+        var path = Path.Combine(_dir, "standard-reaction.json");
+        await File.WriteAllTextAsync(
+            path,
+            """
+            {
+              "guild": {
+                "id": "1",
+                "name": "Test Guild",
+                "iconUrl": ""
+              },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": "topic"
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "reacted",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [],
+                  "stickers": [],
+                  "reactions": [
+                    {
+                      "emoji": {
+                        "id": "",
+                        "name": "🙂",
+                        "code": "slight_smile",
+                        "isAnimated": false,
+                        "imageUrl": "emoji-local.png"
+                      },
+                      "count": 3,
+                      "users": []
+                    }
+                  ],
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+
+        var parsed = await JsonExportReader.ParseAsync(path);
+
+        var reaction = parsed.Messages.Should().ContainSingle().Subject.Reactions.Should().ContainSingle().Subject;
+        reaction.Emoji.Id.Should().BeNull();
+        reaction.Emoji.Name.Should().Be("🙂");
+        reaction.Emoji.ImageUrl.Should().Be("emoji-local.png");
+    }
 }

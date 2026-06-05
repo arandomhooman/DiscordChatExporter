@@ -87,6 +87,15 @@ public static class SqliteExportInspector
                 ex
             );
         }
+        catch (Exception ex)
+            when (ex is FormatException or InvalidCastException or InvalidOperationException
+                or OverflowException)
+        {
+            throw new InvalidExportException(
+                $"'{filePath}' is not a valid SQLite chat export.",
+                ex
+            );
+        }
     }
 
     private static Snowflake? ParseSnowflakeDate(string? text) =>
