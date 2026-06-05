@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Library;
 using DiscordChatExporter.Core.Exporting.Manifest;
 using DiscordChatExporter.Gui.Framework;
@@ -17,6 +18,12 @@ public partial class LibraryViewModel : ViewModelBase
 {
     private readonly SettingsService _settingsService;
     private readonly DialogManager _dialogManager;
+
+    // Cached file -> catalog-entry lookup, rebuilt on each reload, so search labelling doesn't
+    // rebuild a dictionary over the whole catalog on every query.
+    private Dictionary<string, ManifestEntry> _entriesByFile = new(
+        StringComparer.OrdinalIgnoreCase
+    );
 
     public LibraryViewModel(
         SettingsService settingsService,
@@ -47,11 +54,6 @@ public partial class LibraryViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
-    // True once a non-blank search has run; gates the "no matching messages" empty state so it
-    // never shows before the user has actually searched.
-    [ObservableProperty]
-    public partial bool HasSearched { get; set; }
-
     // Empty-state flags, kept mutually exclusive so only one hint ever renders:
     //  - ShowNoResults: a non-blank search returned nothing.
     //  - ShowSearchUnavailable: there are exports, but none are searchable (.db).
@@ -78,11 +80,13 @@ public partial class LibraryViewModel : ViewModelBase
             foreach (var entry in catalog)
                 Entries.Add(entry);
 
+            // Rebuild the file -> entry lookup used to label search hits.
+            _entriesByFile = Entries.ToDictionary(e => e.File, StringComparer.OrdinalIgnoreCase);
+
             HasSearchableExports = Entries.Any(IsSqlite);
             SearchResults.Clear();
 
             // A reload/scan resets search state so stale empty-state hints don't linger.
-            HasSearched = false;
             ShowNoResults = false;
             ShowSearchUnavailable = Entries.Count > 0 && !HasSearchableExports;
         }
@@ -121,11 +125,7 @@ public partial class LibraryViewModel : ViewModelBase
 
         var query = SearchQuery;
         if (string.IsNullOrWhiteSpace(query))
-        {
-            // A blank query isn't a search; clear the flag so no "no results" hint shows.
-            HasSearched = false;
             return;
-        }
 
         var dbPaths = Entries.Where(IsSqlite).Select(e => e.File).ToArray();
 
@@ -134,15 +134,13 @@ public partial class LibraryViewModel : ViewModelBase
         {
             var hits = await SqliteExportReader.SearchAcrossAsync(dbPaths, query, 200);
 
-            // Label each hit by joining its source db path back to the catalog entry.
-            var byFile = Entries.ToDictionary(e => e.File, StringComparer.OrdinalIgnoreCase);
+            // Label each hit by joining its source db path back to the cached catalog lookup.
             foreach (var hit in hits)
             {
-                byFile.TryGetValue(hit.DatabaseFilePath, out var source);
+                _entriesByFile.TryGetValue(hit.DatabaseFilePath, out var source);
                 SearchResults.Add(new LibrarySearchResult(hit, source));
             }
 
-            HasSearched = true;
             ShowNoResults = SearchResults.Count == 0;
         }
         finally
@@ -155,8 +153,11 @@ public partial class LibraryViewModel : ViewModelBase
     private void NavigateBack() => BackRequested?.Invoke(this, EventArgs.Empty);
 
     private static bool IsSqlite(ManifestEntry entry) =>
-        string.Equals(entry.Format, "db", StringComparison.OrdinalIgnoreCase)
-        || entry.File.EndsWith(".db", StringComparison.OrdinalIgnoreCase);
+        string.Equals(entry.Format, ExportFormat.Db.ToString(), StringComparison.OrdinalIgnoreCase)
+        || entry.File.EndsWith(
+            "." + ExportFormat.Db.GetFileExtension(),
+            StringComparison.OrdinalIgnoreCase
+        );
 }
 
 // A search hit paired with the catalog entry of the export it came from (for display labels).

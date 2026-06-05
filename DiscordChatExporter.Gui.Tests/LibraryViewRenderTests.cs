@@ -119,7 +119,6 @@ public sealed class LibraryViewRenderTests
         // Exercise the mutually-exclusive empty-state visibility bindings: with results present we
         // want the catalog + results lists visible and the empty-state hints suppressed.
         viewModel.HasSearchableExports = true;
-        viewModel.HasSearched = true;
         viewModel.ShowNoResults = false;
         viewModel.ShowSearchUnavailable = false;
 

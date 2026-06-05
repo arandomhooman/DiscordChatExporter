@@ -56,11 +56,9 @@ public sealed class MainViewNavigationTests
         var settings = provider.GetRequiredService<SettingsService>();
         settings.IsUkraineSupportMessageEnabled = false;
 
+        // Navigation (CurrentPage = Dashboard + the LibraryRequested subscription) is wired in the
+        // constructor, so it's live immediately — InitializeAsync isn't needed for it.
         var mainViewModel = provider.GetRequiredService<MainViewModel>();
-
-        // The navigation wiring is the synchronous prefix of InitializeAsync (runs before the first
-        // await), so don't await — the dialog/update branches that follow would stall the test.
-        _ = mainViewModel.InitializeAsync();
 
         // Initial page is the Dashboard.
         var dashboard = mainViewModel.Dashboard;
@@ -86,7 +84,6 @@ public sealed class MainViewNavigationTests
         settings.IsUkraineSupportMessageEnabled = false;
 
         var mainViewModel = provider.GetRequiredService<MainViewModel>();
-        _ = mainViewModel.InitializeAsync();
 
         var dashboard = mainViewModel.Dashboard;
 
