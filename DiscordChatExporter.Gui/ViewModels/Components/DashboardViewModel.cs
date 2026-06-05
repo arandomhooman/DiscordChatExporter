@@ -116,6 +116,8 @@ public partial class DashboardViewModel : ViewModelBase
     [NotifyCanExecuteChangedFor(nameof(ContinueExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(RetryFailedExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(SelectAllChannelsCommand))]
+    [NotifyCanExecuteChangedFor(nameof(NavigateToLibraryCommand))]
+    [NotifyCanExecuteChangedFor(nameof(NavigateToConversionCommand))]
     public partial bool IsBusy { get; set; }
 
     [ObservableProperty]
@@ -261,10 +263,12 @@ public partial class DashboardViewModel : ViewModelBase
 
     public event EventHandler? ConversionRequested;
 
-    [RelayCommand]
+    private bool CanNavigate() => !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanNavigate))]
     private void NavigateToLibrary() => LibraryRequested?.Invoke(this, EventArgs.Empty);
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanNavigate))]
     private void NavigateToConversion() => ConversionRequested?.Invoke(this, EventArgs.Empty);
 
     private bool CanPullGuilds() => !IsBusy && !string.IsNullOrWhiteSpace(Token);
@@ -285,6 +289,7 @@ public partial class DashboardViewModel : ViewModelBase
             SelectedGuild = null;
             AvailableChannels = null;
             SelectedChannels.Clear();
+            ClearFailedExportState();
 
             var discord = new DiscordClient(token, _settingsService.RateLimitPreference);
             SetDiscordClient(discord);
@@ -914,6 +919,9 @@ public partial class DashboardViewModel : ViewModelBase
                     {
                         FirstMessageId = prior.FirstMessageId,
                         FirstMessageTimestamp = prior.FirstMessageTimestamp,
+                        LastMessageId = prior.LastMessageId,
+                        LastMessageTimestamp = prior.LastMessageTimestamp,
+                        AssetCount = prior.AssetCount,
                     },
                 ];
 
@@ -955,11 +963,7 @@ public partial class DashboardViewModel : ViewModelBase
                 manifestsByDir[dir] = manifest;
             }
 
-            if (
-                ManifestResume
-                    .AlreadyExported(manifest, [Path.GetFileName(r.Request.OutputFilePath)])
-                    .Count > 0
-            )
+            if (ManifestResume.IsAlreadyExported(manifest, dir, r.Request))
             {
                 alreadyDone.Add(r);
             }
@@ -1132,6 +1136,12 @@ public partial class DashboardViewModel : ViewModelBase
         RetryFailedExportCommand.NotifyCanExecuteChanged();
     }
 
+    private void ClearFailedExportState()
+    {
+        _lastExportSetup = null;
+        UpdateFailedChannels([]);
+    }
+
     private bool CanRetryFailedExport() =>
         !IsBusy
         && _discord is not null
@@ -1171,8 +1181,7 @@ public partial class DashboardViewModel : ViewModelBase
 
     public bool HasFailedExport => _lastFailedChannels.Count > 0;
 
-    private bool CanContinueExport() =>
-        !IsBusy && _discord is not null && SelectedGuild is not null && SelectedChannels.Any();
+    private bool CanContinueExport() => !IsBusy && _discord is not null;
 
     [RelayCommand(CanExecute = nameof(CanContinueExport))]
     private async Task ContinueExportAsync()

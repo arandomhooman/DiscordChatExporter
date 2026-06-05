@@ -116,4 +116,21 @@ public sealed class MainViewNavigationTests
         ((ConversionViewModel)mainViewModel.CurrentPage!).NavigateBackCommand.Execute(null);
         mainViewModel.CurrentPage.Should().BeSameAs(dashboard);
     }
+
+    [AvaloniaFact]
+    public void Dashboard_navigation_commands_are_disabled_while_busy()
+    {
+        using var provider = BuildServices();
+
+        var settings = provider.GetRequiredService<SettingsService>();
+        settings.IsUkraineSupportMessageEnabled = false;
+
+        var mainViewModel = provider.GetRequiredService<MainViewModel>();
+        var dashboard = mainViewModel.Dashboard;
+
+        dashboard.IsBusy = true;
+
+        dashboard.NavigateToLibraryCommand.CanExecute(null).Should().BeFalse();
+        dashboard.NavigateToConversionCommand.CanExecute(null).Should().BeFalse();
+    }
 }

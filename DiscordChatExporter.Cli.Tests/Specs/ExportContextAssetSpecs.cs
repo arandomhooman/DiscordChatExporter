@@ -1,0 +1,82 @@
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using DiscordChatExporter.Core.Discord;
+using DiscordChatExporter.Core.Discord.Data;
+using DiscordChatExporter.Core.Exporting;
+using DiscordChatExporter.Core.Exporting.Filtering;
+using DiscordChatExporter.Core.Exporting.Partitioning;
+using FluentAssertions;
+using Xunit;
+
+namespace DiscordChatExporter.Cli.Tests.Specs;
+
+public sealed class ExportContextAssetSpecs : IDisposable
+{
+    private readonly string _dir = Path.Combine(
+        Path.GetTempPath(),
+        "DceAssets_" + Guid.NewGuid().ToString("N")
+    );
+
+    public ExportContextAssetSpecs() => Directory.CreateDirectory(_dir);
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_dir, true);
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+    }
+
+    [Fact]
+    public async Task Resolve_asset_url_preserves_user_cancellation()
+    {
+        var guild = new Guild(new Snowflake(1), "Test Guild", "");
+        var channel = new Channel(
+            new Snowflake(2),
+            ChannelKind.GuildTextChat,
+            guild.Id,
+            null,
+            "general",
+            null,
+            null,
+            null,
+            false,
+            null
+        );
+        var outputPath = Path.Combine(_dir, "chat.html");
+        var request = new ExportRequest(
+            guild,
+            channel,
+            outputPath,
+            null,
+            ExportFormat.HtmlDark,
+            null,
+            null,
+            PartitionLimit.Null,
+            MessageFilter.Null,
+            isReverseMessageOrder: false,
+            shouldFormatMarkdown: true,
+            shouldDownloadAssets: true,
+            shouldReuseAssets: false,
+            locale: "en-US",
+            isUtcNormalizationEnabled: true
+        );
+        var context = new ExportContext(new DiscordClient("fake-token"), request);
+        using var cancellationTokenSource = new CancellationTokenSource();
+        await cancellationTokenSource.CancelAsync();
+
+        var act = async () =>
+            await context.ResolveAssetUrlAsync(
+                "https://example.com/avatar.png",
+                cancellationTokenSource.Token
+            );
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+}

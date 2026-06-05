@@ -49,20 +49,17 @@ public static class SqliteExportInspector
             }
 
             long count;
-            string? firstIdText;
-            string? lastIdText;
+            string? maxIdText;
             await using (var messages = connection.CreateCommand())
             {
                 messages.CommandText =
                     "SELECT COUNT(*), "
-                    + "(SELECT id FROM messages ORDER BY rowid ASC LIMIT 1), "
-                    + "(SELECT id FROM messages ORDER BY rowid DESC LIMIT 1) "
+                    + "(SELECT id FROM messages ORDER BY CAST(id AS INTEGER) DESC LIMIT 1) "
                     + "FROM messages;";
                 await using var reader = await messages.ExecuteReaderAsync(cancellationToken);
                 await reader.ReadAsync(cancellationToken);
                 count = reader.GetInt64(0);
-                firstIdText = reader.IsDBNull(1) ? null : reader.GetString(1);
-                lastIdText = reader.IsDBNull(2) ? null : reader.GetString(2);
+                maxIdText = reader.IsDBNull(1) ? null : reader.GetString(1);
             }
 
             var channelId = new Snowflake(ulong.Parse(channelIdText, CultureInfo.InvariantCulture));
@@ -71,18 +68,10 @@ public static class SqliteExportInspector
 
             Snowflake cutoff;
             bool exact;
-            var isChronological = true;
-            if (lastIdText is not null)
+            if (maxIdText is not null)
             {
-                cutoff = new Snowflake(ulong.Parse(lastIdText, CultureInfo.InvariantCulture));
+                cutoff = new Snowflake(ulong.Parse(maxIdText, CultureInfo.InvariantCulture));
                 exact = true;
-                if (firstIdText is not null)
-                {
-                    var first = new Snowflake(
-                        ulong.Parse(firstIdText, CultureInfo.InvariantCulture)
-                    );
-                    isChronological = first.Value <= cutoff.Value;
-                }
             }
             else
             {
@@ -90,7 +79,7 @@ public static class SqliteExportInspector
                 exact = false;
             }
 
-            return new ContinuationCutoff(channelId, cutoff, before, isChronological, count, exact);
+            return new ContinuationCutoff(channelId, cutoff, before, true, count, exact);
         }
         catch (SqliteException ex)
         {

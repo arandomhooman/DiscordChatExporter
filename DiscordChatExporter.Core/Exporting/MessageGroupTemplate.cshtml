@@ -1,6 +1,7 @@
 @using System
 @using System.Collections.Generic
 @using System.Linq
+@using System.Net
 @using System.Threading.Tasks
 @using DiscordChatExporter.Core.Discord.Data
 @using DiscordChatExporter.Core.Discord.Data.Embeds
@@ -17,8 +18,10 @@
 }
 
 @{
-    ValueTask<string> ResolveAssetUrlAsync(string url) =>
-        Context.ResolveAssetUrlAsync(url, CancellationToken);
+    async ValueTask<string> ResolveAssetUrlAsync(string url) =>
+        HtmlMarkdownVisitor.SanitizeHtmlAssetUrl(
+            await Context.ResolveAssetUrlAsync(url, CancellationToken)
+        );
 
     string FormatDate(DateTimeOffset instant, string format = "g") =>
         Context.FormatDate(instant, format);
@@ -26,12 +29,12 @@
     async ValueTask<string> FormatMarkdownAsync(string markdown) =>
         Context.Request.ShouldFormatMarkdown
             ? await HtmlMarkdownVisitor.FormatAsync(Context, markdown, true, CancellationToken)
-            : markdown;
+            : WebUtility.HtmlEncode(markdown);
 
     async ValueTask<string> FormatEmbedMarkdownAsync(string markdown) =>
         Context.Request.ShouldFormatMarkdown
             ? await HtmlMarkdownVisitor.FormatAsync(Context, markdown, false, CancellationToken)
-            : markdown;
+            : WebUtility.HtmlEncode(markdown);
 }
 
 <div class="chatlog__message-group">

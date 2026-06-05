@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -67,10 +68,37 @@ internal partial class ExportAssetDownloader(string workingDirPath, bool reuse)
         await Http.ResiliencePipeline.ExecuteAsync(
             async innerCancellationToken =>
             {
-                // Download the file
-                using var response = await Http.Client.GetAsync(url, innerCancellationToken);
-                await using var output = File.Create(filePath);
-                await response.Content.CopyToAsync(output, innerCancellationToken);
+                var tempFilePath = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+                try
+                {
+                    // Download the file
+                    using var response = await Http.Client.GetAsync(
+                        url,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        innerCancellationToken
+                    );
+                    response.EnsureSuccessStatusCode();
+
+                    await using (var output = File.Create(tempFilePath))
+                    {
+                        await response.Content.CopyToAsync(output, innerCancellationToken);
+                    }
+
+                    File.Move(tempFilePath, filePath, overwrite: true);
+                }
+                catch
+                {
+                    try
+                    {
+                        File.Delete(tempFilePath);
+                    }
+                    catch
+                    { /* best-effort temp cleanup */
+                    }
+
+                    throw;
+                }
             },
             cancellationToken
         );

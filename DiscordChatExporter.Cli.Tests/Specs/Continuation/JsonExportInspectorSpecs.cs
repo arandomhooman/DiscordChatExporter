@@ -41,8 +41,7 @@ public class JsonExportInspectorSpecs
         }
         """;
 
-    // Same ids (1000 then 2000) but the first message carries the LATER timestamp,
-    // so the export is stored out of chronological order.
+    // Same timestamps, but ids are reversed. Snowflakes define message order.
     private const string ReverseOrdered = """
         {
           "guild": { "id": "111", "name": "G" },
@@ -50,8 +49,8 @@ public class JsonExportInspectorSpecs
           "dateRange": { "after": null, "before": null },
           "exportedAt": "2021-01-01T00:00:00+00:00",
           "messages": [
-            { "id": "1000", "type": "Default", "timestamp": "2021-07-24T13:49:13+00:00", "content": "a" },
-            { "id": "2000", "type": "Default", "timestamp": "2021-07-19T13:34:18+00:00", "content": "b" }
+            { "id": "2000", "type": "Default", "timestamp": "2021-07-19T13:34:18+00:00", "content": "a" },
+            { "id": "1000", "type": "Default", "timestamp": "2021-07-19T13:34:18+00:00", "content": "b" }
           ],
           "messageCount": 2
         }
@@ -116,7 +115,33 @@ public class JsonExportInspectorSpecs
             var info = await JsonExportInspector.InspectAsync(path);
             info.IsChronological.Should().BeFalse();
             // The cutoff is still the last element in the array, regardless of order.
-            info.LastMessageId.Value.Should().Be(2000UL);
+            info.LastMessageId.Value.Should().Be(1000UL);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Malformed_snowflakes_are_reported_as_invalid_json_exports()
+    {
+        var path = await WriteTempAsync(
+            """
+            {
+              "guild": { "id": "not-a-snowflake", "name": "G" },
+              "channel": { "id": "222", "name": "C" },
+              "messages": [
+                { "id": "1000", "type": "Default", "timestamp": "2021-07-19T13:34:18+00:00", "content": "a" }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+        try
+        {
+            var act = async () => await JsonExportInspector.InspectAsync(path);
+            await act.Should().ThrowAsync<InvalidJsonExportException>();
         }
         finally
         {

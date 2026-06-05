@@ -55,7 +55,11 @@ public partial record Message(
             yield return user;
 
         if (ReferencedMessage is not null)
+        {
             yield return ReferencedMessage.Author;
+            foreach (var user in ReferencedMessage.MentionedUsers)
+                yield return user;
+        }
 
         if (Interaction is not null)
             yield return Interaction.User;
@@ -185,7 +189,9 @@ public partial record Message
             .Select(MessageSnapshot.Parse)
             .FirstOrDefault();
 
-        var interaction = json.GetPropertyOrNull("interaction")?.Pipe(Interaction.Parse);
+        var interaction = (
+            json.GetPropertyOrNull("interaction") ?? json.GetPropertyOrNull("interaction_metadata")
+        )?.Pipe(Interaction.Parse);
 
         return new Message(
             id,

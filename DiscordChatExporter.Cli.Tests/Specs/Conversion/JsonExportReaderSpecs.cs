@@ -39,7 +39,7 @@ public sealed class JsonExportReaderSpecs : IDisposable
         }
     }
 
-    private static ExportContext CreateContext(string outputPath)
+    private static ExportContext CreateContext(string outputPath, bool shouldFormatMarkdown = false)
     {
         var guild = new Guild(new Snowflake(1), "Test Guild", "");
         var channel = new Channel(
@@ -65,7 +65,7 @@ public sealed class JsonExportReaderSpecs : IDisposable
             PartitionLimit.Null,
             MessageFilter.Null,
             isReverseMessageOrder: false,
-            shouldFormatMarkdown: false,
+            shouldFormatMarkdown,
             shouldDownloadAssets: false,
             shouldReuseAssets: false,
             locale: "en-US",
@@ -150,6 +150,52 @@ public sealed class JsonExportReaderSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Reader_prefers_raw_embed_markdown_fields()
+    {
+        var path = Path.Combine(_dir, "embed-raw-markdown.json");
+        var author = CreateUser(10, "alice");
+        await using (var writer = new JsonMessageWriter(
+            File.Create(path),
+            CreateContext(path, shouldFormatMarkdown: true)
+        ))
+        {
+            await writer.WritePreambleAsync();
+            await writer.WriteMessageAsync(
+                CreateMessage(1001, author, CreateUser(11, "bob")) with
+                {
+                    Embeds =
+                    [
+                        new Embed(
+                            "**raw title**",
+                            EmbedKind.Rich,
+                            null,
+                            null,
+                            null,
+                            null,
+                            "__raw description__",
+                            [new EmbedField("**field name**", "`field value`", false)],
+                            null,
+                            [],
+                            null,
+                            null
+                        ),
+                    ],
+                }
+            );
+            await writer.WritePostambleAsync();
+        }
+
+        var parsed = await JsonExportReader.ParseAsync(path);
+
+        var embed = parsed.Messages.Single().Embeds.Should().ContainSingle().Subject;
+        embed.Title.Should().Be("**raw title**");
+        embed.Description.Should().Be("__raw description__");
+        var field = embed.Fields.Should().ContainSingle().Subject;
+        field.Name.Should().Be("**field name**");
+        field.Value.Should().Be("`field value`");
+    }
+
+    [Fact]
     public async Task Reader_reconstructs_messages_from_json_export()
     {
         var path = await WriteJsonAsync("chat.json");
@@ -169,6 +215,87 @@ public sealed class JsonExportReaderSpecs : IDisposable
             .ContainSingle()
             .Which.Id.Should()
             .Be(new Snowflake(11));
+    }
+
+    [Fact]
+    public async Task Reader_prefers_raw_content_and_preserves_flags_bounds_and_attachment_metadata()
+    {
+        var path = await WriteRawJsonAsync(
+            "raw-fields.json",
+            """
+            {
+              "guild": { "id": "1", "name": "Test Guild", "iconUrl": "" },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": "topic"
+              },
+              "dateRange": {
+                "after": "2021-07-01T00:00:00+00:00",
+                "before": "2021-08-01T00:00:00+00:00"
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "flags": 2,
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "hello @bob",
+                  "contentRaw": "hello <@11>",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [
+                    {
+                      "id": "50",
+                      "url": "file-local.png",
+                      "fileName": "file.png",
+                      "description": "alt text",
+                      "width": 640,
+                      "height": 480,
+                      "fileSizeBytes": 123
+                    }
+                  ],
+                  "embeds": [],
+                  "stickers": [],
+                  "reactions": [],
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+
+        var parsed = await JsonExportReader.ParseAsync(path);
+        var message = parsed.Messages.Should().ContainSingle().Subject;
+
+        parsed
+            .After.Should()
+            .Be(Snowflake.FromDate(DateTimeOffset.Parse("2021-07-01T00:00:00+00:00")));
+        parsed
+            .Before.Should()
+            .Be(Snowflake.FromDate(DateTimeOffset.Parse("2021-08-01T00:00:00+00:00")));
+        message.Content.Should().Be("hello <@11>");
+        message.Flags.Should().Be(MessageFlags.CrossPost);
+        var attachment = message.Attachments.Should().ContainSingle().Subject;
+        attachment.Description.Should().Be("alt text");
+        attachment.Width.Should().Be(640);
+        attachment.Height.Should().Be(480);
     }
 
     [Fact]

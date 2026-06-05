@@ -96,9 +96,8 @@ public static class ContinuationFormat
     )
     {
         var info = await JsonExportInspector.InspectAsync(filePath, ct);
-        var channelId = FileNameChannelId.TryParse(filePath) ?? info.ChannelId;
         return new ContinuationCutoff(
-            channelId,
+            info.ChannelId,
             info.LastMessageId,
             info.Before,
             info.IsChronological,

@@ -70,6 +70,7 @@ public sealed partial class ConversionViewModel(
     [NotifyCanExecuteChangedFor(nameof(ConvertCommand))]
     [NotifyCanExecuteChangedFor(nameof(PickFilesCommand))]
     [NotifyCanExecuteChangedFor(nameof(PickOutputFolderCommand))]
+    [NotifyCanExecuteChangedFor(nameof(NavigateBackCommand))]
     [NotifyPropertyChangedFor(nameof(CanEditConversionState))]
     public partial bool IsBusy { get; set; }
 
@@ -243,7 +244,7 @@ public sealed partial class ConversionViewModel(
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditConversionState))]
     private void NavigateBack() => BackRequested?.Invoke(this, EventArgs.Empty);
 
     private IEnumerable<ExportFormat> GetTargetFormats()
@@ -264,32 +265,41 @@ public sealed partial class ConversionViewModel(
         IReadOnlyList<string> sourceFilePaths,
         IReadOnlyList<ExportFormat> targetFormats,
         string outputFolderPath
-    ) =>
-        sourceFilePaths
+    )
+    {
+        var disambiguateHtml =
+            targetFormats.Contains(ExportFormat.HtmlDark)
+            && targetFormats.Contains(ExportFormat.HtmlLight);
+
+        return sourceFilePaths
             .SelectMany(
                 (sourcePath, sourceIndex) =>
                     targetFormats.Select(format => new ConversionJob(
                         sourceIndex,
                         sourcePath,
-                        GetOutputPath(outputFolderPath, sourcePath, format),
+                        GetOutputPath(outputFolderPath, sourcePath, format, disambiguateHtml),
                         format
                     ))
             )
             .ToArray();
+    }
 
     private static string GetOutputPath(
         string outputFolderPath,
         string sourcePath,
-        ExportFormat format
+        ExportFormat format,
+        bool disambiguateHtml
     )
     {
         var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(sourcePath);
-        var formatSuffix = format switch
-        {
-            ExportFormat.HtmlDark => ".dark",
-            ExportFormat.HtmlLight => ".light",
-            _ => "",
-        };
+        var formatSuffix = disambiguateHtml
+            ? format switch
+            {
+                ExportFormat.HtmlDark => ".dark",
+                ExportFormat.HtmlLight => ".light",
+                _ => "",
+            }
+            : "";
 
         return Path.Combine(
             outputFolderPath,

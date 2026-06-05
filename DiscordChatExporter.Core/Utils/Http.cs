@@ -96,25 +96,32 @@ public static class Http
                     },
                     OnRetry = async args =>
                     {
-                        if (!IsRateLimitResponse(args.Outcome.Result))
-                            return;
-
-                        if (
-                            !args.Context.Properties.TryGetValue(
-                                RateLimitDelayHandlerKey,
-                                out var delayHandler
-                            )
-                        )
+                        try
                         {
-                            return;
+                            if (!IsRateLimitResponse(args.Outcome.Result))
+                                return;
+
+                            if (
+                                !args.Context.Properties.TryGetValue(
+                                    RateLimitDelayHandlerKey,
+                                    out var delayHandler
+                                )
+                            )
+                            {
+                                return;
+                            }
+
+                            var delay = args.Context.Properties.GetValue(
+                                RateLimitDelayKey,
+                                args.RetryDelay
+                            );
+
+                            await delayHandler(delay, args.Context.CancellationToken);
                         }
-
-                        var delay = args.Context.Properties.GetValue(
-                            RateLimitDelayKey,
-                            args.RetryDelay
-                        );
-
-                        await delayHandler(delay, args.Context.CancellationToken);
+                        finally
+                        {
+                            args.Outcome.Result?.Dispose();
+                        }
                     },
                 }
             )

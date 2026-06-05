@@ -265,7 +265,10 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
         // Try to catch only exceptions related to failed HTTP requests
         // https://github.com/Tyrrrz/DiscordChatExporter/issues/332
         // https://github.com/Tyrrrz/DiscordChatExporter/issues/372
-        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        catch (Exception ex)
+            when (ex is HttpRequestException
+                || ex is OperationCanceledException && !cancellationToken.IsCancellationRequested
+            )
         {
             // We don't want this to crash the exporting process in case of failure.
             // TODO: add logging so we can be more liberal with catching exceptions.

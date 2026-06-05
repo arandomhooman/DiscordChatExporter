@@ -19,7 +19,9 @@ public sealed record ParsedExport(
     Guild Guild,
     Channel Channel,
     IReadOnlyList<Message> Messages,
-    ConversionData? ConversionData
+    ConversionData? ConversionData,
+    Snowflake? After,
+    Snowflake? Before
 );
 
 public static class JsonExportReader
@@ -56,6 +58,9 @@ public static class JsonExportReader
 
             var guild = ParseGuild(guildJson);
             var channel = ParseChannel(channelJson, guild.Id);
+            var (after, before) = root.TryGetProperty("dateRange", out var dateRangeJson)
+                ? ParseDateRange(dateRangeJson)
+                : (null, null);
             var messages = RelinkReferencedMessages(
                 messagesJson.EnumerateArray().Select(ParseMessage).ToArray()
             );
@@ -69,7 +74,7 @@ public static class JsonExportReader
                 : null;
             conversionData = MergeConversionData(conversionData, inlineEmojis);
 
-            return new ParsedExport(guild, channel, messages, conversionData);
+            return new ParsedExport(guild, channel, messages, conversionData, after, before);
         }
         catch (InvalidExportException)
         {
@@ -132,13 +137,13 @@ public static class JsonExportReader
         new(
             ParseSnowflake(json.GetProperty("id")),
             ParseEnum(GetString(json, "type"), MessageKind.Default),
-            MessageFlags.None,
+            (MessageFlags)GetInt32(json, "flags"),
             ParseUser(json.GetProperty("author")),
             ParseDate(GetString(json, "timestamp")),
             ParseDateOrNull(json, "timestampEdited"),
             ParseDateOrNull(json, "callEndedTimestamp"),
             GetBoolean(json, "isPinned"),
-            GetString(json, "content"),
+            GetStringOrNull(json, "contentRaw") ?? GetString(json, "content"),
             ParseArray(json, "attachments", ParseAttachment),
             ParseArray(json, "embeds", ParseEmbed),
             ParseArray(json, "stickers", ParseSticker),
@@ -176,21 +181,21 @@ public static class JsonExportReader
             ParseSnowflake(json.GetProperty("id")),
             GetString(json, "url"),
             GetString(json, "fileName"),
-            null,
-            null,
-            null,
+            GetStringOrNull(json, "description"),
+            GetInt32OrNull(json, "width"),
+            GetInt32OrNull(json, "height"),
             FileSize.FromBytes(GetInt64(json, "fileSizeBytes"))
         );
 
     private static Embed ParseEmbed(JsonElement json) =>
         new(
-            GetStringOrNull(json, "title"),
+            GetStringOrNull(json, "titleRaw") ?? GetStringOrNull(json, "title"),
             ParseEnum(GetStringOrNull(json, "type"), InferLegacyEmbedKind(json)),
             GetStringOrNull(json, "url"),
             ParseDateOrNull(json, "timestamp"),
             ParseColor(GetStringOrNull(json, "color")),
             json.TryGetProperty("author", out var author) ? ParseEmbedAuthor(author) : null,
-            GetStringOrNull(json, "description"),
+            GetStringOrNull(json, "descriptionRaw") ?? GetStringOrNull(json, "description"),
             ParseArray(json, "fields", ParseEmbedField),
             json.TryGetProperty("thumbnail", out var thumbnail) ? ParseEmbedImage(thumbnail) : null,
             ParseArray(json, "images", ParseEmbedImage),
@@ -283,7 +288,11 @@ public static class JsonExportReader
         );
 
     private static EmbedField ParseEmbedField(JsonElement json) =>
-        new(GetString(json, "name"), GetString(json, "value"), GetBoolean(json, "isInline"));
+        new(
+            GetStringOrNull(json, "nameRaw") ?? GetString(json, "name"),
+            GetStringOrNull(json, "valueRaw") ?? GetString(json, "value"),
+            GetBoolean(json, "isInline")
+        );
 
     private static Sticker ParseSticker(JsonElement json) =>
         new(
@@ -320,7 +329,7 @@ public static class JsonExportReader
         new(
             ParseDate(GetString(json, "timestamp")),
             ParseDateOrNull(json, "timestampEdited"),
-            GetString(json, "content"),
+            GetStringOrNull(json, "contentRaw") ?? GetString(json, "content"),
             ParseArray(json, "attachments", ParseAttachment),
             ParseArray(json, "embeds", ParseEmbed),
             ParseArray(json, "stickers", ParseSticker)
@@ -383,6 +392,12 @@ public static class JsonExportReader
 
         emojis.AddRange(ParseArray(json, "inlineEmojis", ParseConversionEmoji));
 
+        if (json.TryGetProperty("referencedMessage", out var referencedMessage))
+            emojis.AddRange(ParseInlineEmojis(referencedMessage));
+
+        if (json.TryGetProperty("forwardedMessage", out var forwardedMessage))
+            emojis.AddRange(ParseInlineEmojis(forwardedMessage));
+
         foreach (var embed in ParseArray(json, "embeds", embed => embed))
             emojis.AddRange(ParseArray(embed, "inlineEmojis", ParseConversionEmoji));
 
@@ -427,6 +442,20 @@ public static class JsonExportReader
                     : message
             )
             .ToArray();
+    }
+
+    private static (Snowflake? After, Snowflake? Before) ParseDateRange(JsonElement json)
+    {
+        Snowflake? after = null;
+        Snowflake? before = null;
+
+        if (GetStringOrNull(json, "after") is { } afterText)
+            after = Snowflake.FromDate(ParseDate(afterText));
+
+        if (GetStringOrNull(json, "before") is { } beforeText)
+            before = Snowflake.FromDate(ParseDate(beforeText));
+
+        return (after, before);
     }
 
     private static IReadOnlyList<T> ParseArray<T>(

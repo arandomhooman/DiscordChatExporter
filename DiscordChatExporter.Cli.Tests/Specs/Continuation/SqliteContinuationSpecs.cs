@@ -225,14 +225,14 @@ public class SqliteContinuationSpecs : IDisposable
     }
 
     [Fact]
-    public async Task Inspector_detects_reverse_order_from_message_insertion_order()
+    public async Task Inspector_uses_newest_message_id_for_reverse_inserted_exports()
     {
         var path = await WriteDbAsync("reverse.db", (1003, "c"), (1002, "b"), (1001, "a"));
 
         var cutoff = await SqliteExportInspector.InspectAsync(path);
 
-        cutoff.Cutoff.Should().Be(new Snowflake(1001));
-        cutoff.IsChronological.Should().BeFalse();
+        cutoff.Cutoff.Should().Be(new Snowflake(1003));
+        cutoff.IsChronological.Should().BeTrue();
     }
 
     [Fact]

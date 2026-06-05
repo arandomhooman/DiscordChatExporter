@@ -235,7 +235,7 @@ internal static partial class MarkdownParser
     private static readonly IMatcher<MarkdownContext, MarkdownNode> CustomEmojiNodeMatcher =
         new RegexMatcher<MarkdownContext, MarkdownNode>(
             // Capture <:lul:123456> or <a:lul:123456>
-            new Regex(@"<(a)?:(.+?):(\d+?)>", DefaultRegexOptions),
+            new Regex(@"<(a)?:([A-Za-z0-9_]{2,32}):(\d+?)>", DefaultRegexOptions),
             (_, _, m) =>
                 new EmojiNode(
                     Snowflake.TryParse(m.Groups[3].Value),

@@ -97,6 +97,10 @@ public class ChannelExporter(DiscordClient discord)
                     if (request.MessageFilter.IsMatch(message))
                         await messageExporter.ExportMessageAsync(message, cancellationToken);
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     // Provide more context to the exception, to simplify debugging based on error messages

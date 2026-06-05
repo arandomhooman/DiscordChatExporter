@@ -229,6 +229,23 @@ public sealed class ConversionViewModelTests : IDisposable
         viewModel.PickFilesCommand.CanExecute(null).Should().BeFalse();
         viewModel.PickOutputFolderCommand.CanExecute(null).Should().BeFalse();
         viewModel.ConvertCommand.CanExecute(null).Should().BeFalse();
+        viewModel.NavigateBackCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Convert_uses_plain_html_extension_when_only_one_html_format_is_selected()
+    {
+        var json = WriteJson("chat.json", "hello html");
+        var viewModel = CreateViewModel();
+        viewModel.IsHtmlDarkSelected = true;
+        viewModel.IsHtmlLightSelected = false;
+        viewModel.SourceFilePaths.Add(json);
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        viewModel.Results.Should().ContainSingle().Which.OutputFilePath.Should().EndWith("chat.html");
+        File.Exists(Path.Combine(_dir, "chat.html")).Should().BeTrue();
+        File.Exists(Path.Combine(_dir, "chat.dark.html")).Should().BeFalse();
     }
 
     [Fact]

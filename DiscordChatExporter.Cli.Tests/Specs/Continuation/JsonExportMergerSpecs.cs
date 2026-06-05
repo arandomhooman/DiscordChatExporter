@@ -179,4 +179,63 @@ public class JsonExportMergerSpecs
                 File.Delete(existing + ".bak");
         }
     }
+
+    [Fact]
+    public async Task It_merges_conversion_data_from_the_fresh_export()
+    {
+        var existing = await WriteAsync(
+            Existing(MsgA, 1)
+                .Replace(
+                    """
+                      "messageCount": 1
+                    """,
+                    """
+                      "messageCount": 1,
+                      "conversionData": {
+                        "schemaVersion": 1,
+                        "members": [ { "id": "10", "displayName": "Alice", "avatarUrl": null, "colorHex": null, "roleIds": [] } ],
+                        "roles": [],
+                        "channels": [ { "id": "20", "name": "old", "type": "GuildTextChat", "isVoice": false } ],
+                        "emojis": []
+                      }
+                    """
+                )
+        );
+        var fresh = await WriteAsync(
+            Existing(MsgB, 1)
+                .Replace(
+                    """
+                      "messageCount": 1
+                    """,
+                    """
+                      "messageCount": 1,
+                      "conversionData": {
+                        "schemaVersion": 1,
+                        "members": [ { "id": "11", "displayName": "Bob", "avatarUrl": null, "colorHex": null, "roleIds": [] } ],
+                        "roles": [ { "id": "30", "name": "new-role", "colorHex": null, "position": 1 } ],
+                        "channels": [ { "id": "21", "name": "new", "type": "GuildTextChat", "isVoice": false } ],
+                        "emojis": [ { "id": "40", "name": "wave", "isAnimated": false, "imageUrl": "wave.png" } ]
+                      }
+                    """
+                )
+        );
+        try
+        {
+            await JsonExportMerger.MergeAsync(existing, fresh, DateTimeOffset.UtcNow);
+
+            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(existing));
+            var conversionData = doc.RootElement.GetProperty("conversionData");
+            conversionData.GetProperty("members").GetArrayLength().Should().Be(2);
+            conversionData.GetProperty("roles").GetArrayLength().Should().Be(1);
+            conversionData.GetProperty("channels").GetArrayLength().Should().Be(2);
+            conversionData.GetProperty("emojis").GetArrayLength().Should().Be(1);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
 }

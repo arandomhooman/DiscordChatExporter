@@ -102,7 +102,10 @@ public class DiscordClient(
                     // The user may choose to ignore the advisory rate limits and only retry on hard rate limits,
                     // if they want to prioritize speed over compliance (and safety of their account/bot).
                     // https://github.com/Tyrrrz/DiscordChatExporter/issues/1021
-                    if (rateLimitPreference.IsRespectedFor(tokenKind))
+                    if (
+                        response.StatusCode != HttpStatusCode.TooManyRequests
+                        && rateLimitPreference.IsRespectedFor(tokenKind)
+                    )
                     {
                         var remainingRequestCount = response
                             .Headers.TryGetValue("X-RateLimit-Remaining")
@@ -159,8 +162,13 @@ public class DiscordClient(
             cancellationToken
         );
 
-        if (userResponse.StatusCode != HttpStatusCode.Unauthorized)
+        if (userResponse.IsSuccessStatusCode)
             return (_resolvedTokenKind = TokenKind.User).Value;
+
+        if (userResponse.StatusCode != HttpStatusCode.Unauthorized)
+            throw new DiscordChatExporterException(
+                $"Token probe failed: {userResponse.StatusCode.ToString().SeparateWords(' ').ToLowerInvariant()}."
+            );
 
         // Try authenticating as a bot
         using var botResponse = await GetResponseAsync(
@@ -169,8 +177,13 @@ public class DiscordClient(
             cancellationToken
         );
 
-        if (botResponse.StatusCode != HttpStatusCode.Unauthorized)
+        if (botResponse.IsSuccessStatusCode)
             return (_resolvedTokenKind = TokenKind.Bot).Value;
+
+        if (botResponse.StatusCode != HttpStatusCode.Unauthorized)
+            throw new DiscordChatExporterException(
+                $"Token probe failed: {botResponse.StatusCode.ToString().SeparateWords(' ').ToLowerInvariant()}."
+            );
 
         throw new DiscordChatExporterException("Authentication token is invalid.", true);
     }

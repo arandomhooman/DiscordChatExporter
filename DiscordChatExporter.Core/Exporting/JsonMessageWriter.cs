@@ -125,6 +125,17 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             await Context.ResolveAssetUrlAsync(attachment.Url, cancellationToken)
         );
         _writer.WriteString("fileName", attachment.FileName);
+        _writer.WriteString("description", attachment.Description);
+        if (attachment.Width is { } width)
+            _writer.WriteNumber("width", width);
+        else
+            _writer.WriteNull("width");
+
+        if (attachment.Height is { } height)
+            _writer.WriteNumber("height", height);
+        else
+            _writer.WriteNull("height");
+
         _writer.WriteNumber("fileSizeBytes", attachment.FileSize.TotalBytes);
 
         _writer.WriteEndObject();
@@ -245,10 +256,12 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         _writer.WriteStartObject();
 
         _writer.WriteString("name", await FormatMarkdownAsync(embedField.Name, cancellationToken));
+        _writer.WriteString("nameRaw", embedField.Name);
         _writer.WriteString(
             "value",
             await FormatMarkdownAsync(embedField.Value, cancellationToken)
         );
+        _writer.WriteString("valueRaw", embedField.Value);
         _writer.WriteBoolean("isInline", embedField.IsInline);
 
         _writer.WriteEndObject();
@@ -266,6 +279,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             "title",
             await FormatMarkdownAsync(embed.Title ?? "", cancellationToken)
         );
+        _writer.WriteString("titleRaw", embed.Title);
         _writer.WriteString("type", embed.Kind.ToString());
         _writer.WriteString("url", embed.Url);
         _writer.WriteString("timestamp", embed.Timestamp?.Pipe(Context.NormalizeDate));
@@ -273,6 +287,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             "description",
             await FormatMarkdownAsync(embed.Description ?? "", cancellationToken)
         );
+        _writer.WriteString("descriptionRaw", embed.Description);
 
         if (embed.Color is not null)
             _writer.WriteString("color", embed.Color.Value.ToHexString());
@@ -490,6 +505,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         // Metadata
         _writer.WriteString("id", message.Id.ToString());
         _writer.WriteString("type", message.Kind.ToString());
+        _writer.WriteNumber("flags", (int)message.Flags);
         _writer.WriteString("timestamp", Context.NormalizeDate(message.Timestamp));
         _writer.WriteString(
             "timestampEdited",
@@ -505,6 +521,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         if (message.IsSystemNotification)
         {
             _writer.WriteString("content", message.GetFallbackContent());
+            _writer.WriteString("contentRaw", message.Content);
         }
         else
         {
@@ -512,6 +529,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
                 "content",
                 await FormatMarkdownAsync(message.Content, cancellationToken)
             );
+            _writer.WriteString("contentRaw", message.Content);
         }
 
         // Author
@@ -618,6 +636,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
                 "content",
                 await FormatMarkdownAsync(message.ForwardedMessage.Content, cancellationToken)
             );
+            _writer.WriteString("contentRaw", message.ForwardedMessage.Content);
 
             // Forwarded attachments
             _writer.WriteStartArray("attachments");
@@ -639,6 +658,20 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             foreach (var sticker in message.ForwardedMessage.Stickers)
                 await WriteStickerAsync(sticker, cancellationToken);
 
+            _writer.WriteEndArray();
+
+            _writer.WriteStartArray("inlineEmojis");
+            foreach (
+                var emoji in MarkdownParser
+                    .ExtractEmojis(message.ForwardedMessage.Content)
+                    .DistinctBy(e => e.Name, StringComparer.Ordinal)
+            )
+            {
+                await WriteEmojiAsync(
+                    new Emoji(emoji.Id, emoji.Name, emoji.IsAnimated),
+                    cancellationToken
+                );
+            }
             _writer.WriteEndArray();
 
             _writer.WriteEndObject();
@@ -688,6 +721,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
 
         _writer.WriteString("id", message.Id.ToString());
         _writer.WriteString("type", message.Kind.ToString());
+        _writer.WriteNumber("flags", (int)message.Flags);
         _writer.WriteString("timestamp", Context.NormalizeDate(message.Timestamp));
         _writer.WriteString(
             "timestampEdited",
@@ -702,6 +736,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             "content",
             await FormatMarkdownAsync(message.Content, cancellationToken)
         );
+        _writer.WriteString("contentRaw", message.Content);
 
         _writer.WritePropertyName("author");
         await WriteUserAsync(message.Author, true, cancellationToken);

@@ -32,7 +32,7 @@ public static class JsonExportInspector
         {
             return Inspect(bytes);
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or FormatException or OverflowException)
         {
             throw new InvalidJsonExportException(
                 "The selected file is not a valid JSON export.",
@@ -103,7 +103,7 @@ public static class JsonExportInspector
                 "The selected export contains no messages to continue from."
             );
 
-        var isChronological = firstTs is null || lastTs is null || firstTs <= lastTs;
+        var isChronological = firstId is null || firstId.Value.Value <= lastId.Value.Value;
 
         return new JsonExportInfo(
             guildId.Value,

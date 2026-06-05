@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
@@ -182,18 +183,20 @@ internal partial class HtmlMarkdownVisitor(
         CancellationToken cancellationToken = default
     )
     {
+        var linkUrl = IsSafeLinkUrl(link.Url) ? link.Url : "#";
+
         // Try to extract the message ID if the link points to a Discord message
         var linkedMessageId = Regex
-            .Match(link.Url, @"^https?://(?:discord|discordapp)\.com/channels/.*?/(\d+)/?$")
+            .Match(linkUrl, @"^https?://(?:discord|discordapp)\.com/channels/.*?/(\d+)/?$")
             .Groups[1]
             .Value;
 
         buffer.Append(
             !string.IsNullOrWhiteSpace(linkedMessageId)
                 // lang=html
-                ? $"""<a href="{HtmlEncode(link.Url)}" onclick="scrollToMessage(event, '{linkedMessageId}')">"""
+                ? $"""<a href="{HtmlEncode(linkUrl)}" onclick="scrollToMessage(event, '{linkedMessageId}')">"""
                 // lang=html
-                : $"""<a href="{HtmlEncode(link.Url)}">"""
+                : $"""<a href="{HtmlEncode(linkUrl)}">"""
         );
 
         await VisitAsync(link.Children, cancellationToken);
@@ -212,6 +215,9 @@ internal partial class HtmlMarkdownVisitor(
         var jumboClass = isJumbo ? "chatlog__emoji--large" : "";
         var imageUrl =
             context.TryGetEmojiImageUrl(emoji.Id, emoji.Name, emoji.IsAnimated) ?? emoji.ImageUrl;
+        var resolvedImageUrl = SanitizeHtmlAssetUrl(
+            await context.ResolveAssetUrlAsync(imageUrl, cancellationToken)
+        );
 
         buffer.Append(
             // lang=html
@@ -219,9 +225,9 @@ internal partial class HtmlMarkdownVisitor(
             <img
                 loading="lazy"
                 class="chatlog__emoji {jumboClass}"
-                alt="{emoji.Name}"
-                title="{emoji.Code}"
-                src="{await context.ResolveAssetUrlAsync(imageUrl, cancellationToken)}">
+                alt="{HtmlEncode(emoji.Name)}"
+                title="{HtmlEncode(emoji.Code)}"
+                src="{HtmlEncode(resolvedImageUrl)}">
             """
         );
     }
@@ -343,6 +349,30 @@ internal partial class HtmlMarkdownVisitor(
 internal partial class HtmlMarkdownVisitor
 {
     private static string HtmlEncode(string text) => WebUtility.HtmlEncode(text);
+
+    private static bool IsSafeLinkUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+
+    public static string SanitizeHtmlAssetUrl(string url) =>
+        IsSafeHtmlAssetUrl(url) ? url : "#";
+
+    private static bool IsSafeHtmlAssetUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return url.Length > 0;
+
+        var trimmedUrl = url.Trim();
+        if (Path.IsPathFullyQualified(trimmedUrl))
+            return true;
+
+        if (!Uri.TryCreate(trimmedUrl, UriKind.RelativeOrAbsolute, out var uri))
+            return false;
+
+        if (!uri.IsAbsoluteUri)
+            return !trimmedUrl.StartsWith("//", StringComparison.Ordinal);
+
+        return uri.Scheme is "http" or "https" or "file";
+    }
 
     public static async ValueTask<string> FormatAsync(
         ExportContext context,

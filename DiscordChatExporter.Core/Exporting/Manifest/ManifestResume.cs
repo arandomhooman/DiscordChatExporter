@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using DiscordChatExporter.Core.Exporting;
 
 namespace DiscordChatExporter.Core.Exporting.Manifest;
 
@@ -19,5 +21,24 @@ public static class ManifestResume
             : manifest.Entries.Select(e => e.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         return candidateFileNames.Where(have.Contains).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static bool IsAlreadyExported(
+        ExportManifest? manifest,
+        string dirPath,
+        ExportRequest request
+    )
+    {
+        if (manifest is null)
+            return false;
+
+        var fileName = Path.GetFileName(request.OutputFilePath);
+        return manifest.Entries.Any(e =>
+            string.Equals(e.File, fileName, StringComparison.OrdinalIgnoreCase)
+            && e.GuildId == request.Guild.Id.ToString()
+            && e.ChannelId == request.Channel.Id.ToString()
+            && e.Format == request.Format.ToString()
+            && File.Exists(Path.Combine(dirPath, e.File))
+        );
     }
 }

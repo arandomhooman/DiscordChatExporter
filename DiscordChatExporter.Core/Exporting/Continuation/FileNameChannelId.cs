@@ -12,7 +12,8 @@ public static partial class FileNameChannelId
     public static Snowflake? TryParse(string filePath)
     {
         var name = Path.GetFileName(filePath);
-        var match = IdRegex().Match(name);
-        return match.Success ? Snowflake.Parse(match.Groups[1].Value) : null;
+        var matches = IdRegex().Matches(name);
+        var match = matches.Count > 0 ? matches[^1] : null;
+        return match?.Success == true ? Snowflake.Parse(match.Groups[1].Value) : null;
     }
 }

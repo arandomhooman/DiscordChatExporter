@@ -10,6 +10,7 @@ public class FileNameChannelIdSpecs
     [InlineData(@"C:\x\Guild - general [123456789012345678].csv", 123456789012345678UL)]
     [InlineData("Guild - general [42] (after 2026-01-01).html", 42UL)]
     [InlineData("My Server - parent - child [999].json", 999UL)]
+    [InlineData("Guild [111] - channel [222].json", 222UL)]
     public void I_can_parse_the_channel_id_from_a_default_export_filename(
         string path,
         ulong expected

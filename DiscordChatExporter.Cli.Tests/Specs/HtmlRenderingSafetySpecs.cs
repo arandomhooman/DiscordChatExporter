@@ -1,0 +1,155 @@
+using System;
+using System.IO;
+using System.Threading.Tasks;
+using DiscordChatExporter.Core.Discord;
+using DiscordChatExporter.Core.Discord.Data;
+using DiscordChatExporter.Core.Discord.Data.Common;
+using DiscordChatExporter.Core.Exporting;
+using DiscordChatExporter.Core.Exporting.Filtering;
+using DiscordChatExporter.Core.Exporting.Partitioning;
+using FluentAssertions;
+using Xunit;
+
+namespace DiscordChatExporter.Cli.Tests.Specs;
+
+public sealed class HtmlRenderingSafetySpecs : IDisposable
+{
+    private readonly string _dir = Path.Combine(
+        Path.GetTempPath(),
+        "DceHtmlSafe_" + Guid.NewGuid().ToString("N")
+    );
+
+    public HtmlRenderingSafetySpecs() => Directory.CreateDirectory(_dir);
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_dir, true);
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+    }
+
+    private static User CreateUser() => new(new Snowflake(10), false, null, "alice", "alice", "");
+
+    private static Message CreateMessage(string content) =>
+        new(
+            new Snowflake(1000),
+            MessageKind.Default,
+            MessageFlags.None,
+            CreateUser(),
+            DateTimeOffset.UnixEpoch,
+            null,
+            null,
+            false,
+            content,
+            [],
+            [],
+            [],
+            [],
+            [],
+            null,
+            null,
+            null,
+            null
+        );
+
+    private ExportContext CreateContext(string outputPath, bool shouldFormatMarkdown) =>
+        new(
+            new DiscordClient("fake-token"),
+            new ExportRequest(
+                new Guild(new Snowflake(1), "Test Guild", ""),
+                new Channel(
+                    new Snowflake(2),
+                    ChannelKind.GuildTextChat,
+                    new Snowflake(1),
+                    null,
+                    "general",
+                    null,
+                    null,
+                    null,
+                    false,
+                    null
+                ),
+                outputPath,
+                null,
+                ExportFormat.HtmlDark,
+                null,
+                null,
+                PartitionLimit.Null,
+                MessageFilter.Null,
+                isReverseMessageOrder: false,
+                shouldFormatMarkdown,
+                shouldDownloadAssets: false,
+                shouldReuseAssets: false,
+                locale: "en-US",
+                isUtcNormalizationEnabled: true
+            )
+        );
+
+    [Fact]
+    public async Task Html_export_escapes_message_content_when_markdown_formatting_is_disabled()
+    {
+        var outputPath = Path.Combine(_dir, "chat.html");
+        await using (var exporter = new MessageExporter(CreateContext(outputPath, false)))
+        {
+            await exporter.ExportMessageAsync(CreateMessage("""<img src=x onerror="alert(1)">"""));
+        }
+
+        var html = await File.ReadAllTextAsync(outputPath);
+
+        html.Should().Contain("&lt;img src=x");
+        html.Should().NotContain("""<img src=x onerror="alert(1)">""");
+    }
+
+    [Fact]
+    public async Task Html_export_sanitizes_attachment_urls()
+    {
+        var outputPath = Path.Combine(_dir, "chat.html");
+        await using (var exporter = new MessageExporter(CreateContext(outputPath, true)))
+        {
+            await exporter.ExportMessageAsync(
+                CreateMessage("attachment") with
+                {
+                    Attachments =
+                    [
+                        new Attachment(
+                            new Snowflake(50),
+                            "javascript:alert(1)",
+                            "proof.png",
+                            null,
+                            1,
+                            1,
+                            FileSize.FromBytes(1)
+                        ),
+                    ],
+                }
+            );
+        }
+
+        var html = await File.ReadAllTextAsync(outputPath);
+
+        html.Should().Contain("href=#");
+        html.Should().Contain("src=#");
+        html.Should().NotContain("javascript:alert");
+    }
+
+    [Fact]
+    public async Task Masked_markdown_links_do_not_render_active_javascript_urls()
+    {
+        var outputPath = Path.Combine(_dir, "chat.html");
+        var context = CreateContext(outputPath, true);
+
+        var html = await HtmlMarkdownVisitor.FormatAsync(
+            context,
+            "[click](javascript:alert(1))",
+            false
+        );
+
+        html.Should().Contain("""href="#">click</a>""");
+        html.Should().NotContain("javascript:alert");
+    }
+}
