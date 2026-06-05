@@ -28,8 +28,17 @@ public static class ExportCatalogBuilder
             if (manifest is null)
                 continue;
 
+            // ManifestEntry.File is a BARE filename relative to the manifest's own directory
+            // (see ManifestBuilder, which sets it via Path.GetFileName). Resolve it to an
+            // ABSOLUTE path here so downstream consumers (File.Exists, SqliteExportReader,
+            // and the display/join-back in LibraryViewModel) all see a real, openable path.
+            // Path.Combine is a no-op when entry.File is already rooted, so this is safe and
+            // also collapses cross-folder bare-name collisions to distinct absolute keys.
             foreach (var entry in manifest.Entries)
-                byFile[entry.File] = entry;
+            {
+                var absoluteFile = Path.Combine(dir, entry.File);
+                byFile[absoluteFile] = entry with { File = absoluteFile };
+            }
         }
 
         return byFile.Values.OrderByDescending(e => e.ExportedAt).ToArray();

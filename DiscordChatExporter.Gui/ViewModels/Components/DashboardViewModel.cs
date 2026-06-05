@@ -681,7 +681,7 @@ public partial class DashboardViewModel : ViewModelBase
             // Persist the exported folders so the Library home view can discover them.
             foreach (var dir in exportedDirs.Keys)
                 _settingsService.KnownExportDirs = RecentExportDirs
-                    .Add(_settingsService.KnownExportDirs, dir, 50)
+                    .Add(_settingsService.KnownExportDirs, dir, 200)
                     .ToArray();
 
             _settingsService.Save();
