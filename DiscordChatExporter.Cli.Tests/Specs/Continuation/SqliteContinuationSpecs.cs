@@ -8,6 +8,7 @@ using DiscordChatExporter.Core.Exporting.Continuation;
 using DiscordChatExporter.Core.Exporting.Filtering;
 using DiscordChatExporter.Core.Exporting.Partitioning;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace DiscordChatExporter.Cli.Tests.Specs.Continuation;
@@ -108,6 +109,27 @@ public class SqliteContinuationSpecs : IDisposable
         return path;
     }
 
+    private static SqliteConnection OpenReadOnly(string dbPath)
+    {
+        var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Pooling = false,
+                Mode = SqliteOpenMode.ReadOnly,
+            }.ToString()
+        );
+        connection.Open();
+        return connection;
+    }
+
+    private static long Count(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (long)command.ExecuteScalar()!;
+    }
+
     [Fact]
     public async Task Inspector_reads_channel_id_cutoff_and_count()
     {
@@ -142,5 +164,58 @@ public class SqliteContinuationSpecs : IDisposable
         var act = async () => await SqliteExportInspector.InspectAsync(path);
 
         await act.Should().ThrowAsync<InvalidExportException>();
+    }
+
+    [Fact]
+    public async Task Merger_appends_new_messages_and_updates_count_and_fts()
+    {
+        var existing = await WriteDbAsync(
+            "chat.db",
+            (1001, "old one"),
+            (1002, "old two"),
+            (1003, "old three")
+        );
+        var incoming = await WriteDbAsync("new.db", (1004, "fresh four"), (1005, "fresh five"));
+        var cutoff = await SqliteExportInspector.InspectAsync(existing);
+
+        var total = await SqliteExportMerger.MergeAsync(
+            existing,
+            incoming,
+            cutoff,
+            DateTimeOffset.UnixEpoch
+        );
+
+        total.Should().Be(5);
+        using var connection = OpenReadOnly(existing);
+        Count(connection, "SELECT COUNT(*) FROM messages;").Should().Be(5);
+        Count(connection, "SELECT COUNT(*) FROM messages_fts;").Should().Be(5);
+        Count(connection, "SELECT message_count FROM export_info;").Should().Be(5);
+
+        using var query = connection.CreateCommand();
+        query.CommandText = "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'fresh';";
+        ((long)query.ExecuteScalar()!).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Merger_ignores_a_boundary_duplicate_message()
+    {
+        var existing = await WriteDbAsync("chat.db", (1001, "a"), (1002, "b"), (1003, "c"));
+        var incoming = await WriteDbAsync("new.db", (1003, "c again"), (1004, "d"), (1005, "e"));
+        var cutoff = await SqliteExportInspector.InspectAsync(existing);
+
+        var total = await SqliteExportMerger.MergeAsync(
+            existing,
+            incoming,
+            cutoff,
+            DateTimeOffset.UnixEpoch
+        );
+
+        total.Should().Be(5);
+        using var connection = OpenReadOnly(existing);
+        Count(connection, "SELECT COUNT(*) FROM messages;").Should().Be(5);
+
+        using var query = connection.CreateCommand();
+        query.CommandText = "SELECT content FROM messages WHERE id = '1003';";
+        ((string)query.ExecuteScalar()!).Should().Be("c");
     }
 }
