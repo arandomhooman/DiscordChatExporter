@@ -1,6 +1,9 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
+using AngleSharp.Dom;
+using DiscordChatExporter.Cli.Tests.Utils;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exporting;
@@ -100,6 +103,25 @@ public sealed class ExportConverterSpecs : IDisposable
         await writer.WritePreambleAsync();
         await writer.WriteMessageAsync(CreateMessage(1001, author, "the quick brown fox"));
         await writer.WritePostambleAsync();
+        return path;
+    }
+
+    private async Task<string> WriteJsonAsync(string fileName, params Message[] messages)
+    {
+        var path = Path.Combine(_dir, fileName);
+        await using var writer = new JsonMessageWriter(File.Create(path), CreateContext(path));
+        await writer.WritePreambleAsync();
+        foreach (var message in messages)
+            await writer.WriteMessageAsync(message);
+
+        await writer.WritePostambleAsync();
+        return path;
+    }
+
+    private async Task<string> WriteRawJsonAsync(string fileName, string json)
+    {
+        var path = Path.Combine(_dir, fileName);
+        await File.WriteAllTextAsync(path, json);
         return path;
     }
 
@@ -218,6 +240,198 @@ public sealed class ExportConverterSpecs : IDisposable
         var html = await File.ReadAllTextAsync(htmlOut);
         html.Should().Contain("avatar-local.png");
         html.Should().NotContain("remote-avatar.png");
+    }
+
+    [Fact]
+    public async Task Converter_converts_html_with_invite_links_offline_without_fetching_invites()
+    {
+        var author = new User(new Snowflake(10), false, null, "alice", "alice", "");
+        var jsonPath = await WriteJsonAsync(
+            "offline-invite.json",
+            CreateMessage(1001, author, "join https://discord.gg/offline")
+        );
+        var htmlOut = Path.Combine(_dir, "offline-invite.html");
+
+        await ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark);
+
+        var document = Html.Parse(await File.ReadAllTextAsync(htmlOut));
+        document.Body?.TextContent.Should().Contain("https://discord.gg/offline");
+        document.QuerySelector(".chatlog__embed-invite-container").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Converter_relinks_replies_to_messages_in_the_same_json_export()
+    {
+        var author = new User(new Snowflake(10), false, null, "alice", "alice", "");
+        var original = CreateMessage(1001, author, "original body");
+        var reply = CreateMessage(1002, author, "reply body") with
+        {
+            Kind = MessageKind.Reply,
+            Reference = new MessageReference(
+                MessageReferenceKind.Default,
+                original.Id,
+                new Snowflake(2),
+                new Snowflake(1)
+            ),
+        };
+        var jsonPath = await WriteJsonAsync("reply-relink.json", original, reply);
+        var htmlOut = Path.Combine(_dir, "reply-relink.html");
+
+        await ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark);
+
+        var document = Html.Parse(await File.ReadAllTextAsync(htmlOut));
+        var replyElement = document.QuerySelector("""[data-message-id="1002"]""");
+        replyElement.Should().NotBeNull();
+        replyElement!.QuerySelector(".chatlog__reply-unknown").Should().BeNull();
+        replyElement
+            .QuerySelector(".chatlog__reply-link")
+            ?.Text()
+            .Should()
+            .Contain("original body");
+    }
+
+    [Fact]
+    public async Task Converter_preserves_inline_emoji_image_url_in_html()
+    {
+        var jsonPath = await WriteRawJsonAsync(
+            "inline-emoji-url.json",
+            """
+            {
+              "guild": {
+                "id": "1",
+                "name": "Test Guild",
+                "iconUrl": ""
+              },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": "topic"
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "local emoji <:local:12345>",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [],
+                  "stickers": [],
+                  "reactions": [],
+                  "mentions": [],
+                  "inlineEmojis": [
+                    {
+                      "id": "12345",
+                      "name": "local",
+                      "code": "local",
+                      "isAnimated": false,
+                      "imageUrl": "emoji-local.png"
+                    }
+                  ]
+                }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+        var htmlOut = Path.Combine(_dir, "inline-emoji-url.html");
+
+        await ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark);
+
+        var document = Html.Parse(await File.ReadAllTextAsync(htmlOut));
+        document
+            .QuerySelectorAll(".chatlog__emoji")
+            .Select(e => e.GetAttribute("src"))
+            .Should()
+            .Contain("emoji-local.png");
+    }
+
+    [Fact]
+    public async Task Converter_uses_conversion_data_channel_kind_for_channel_mentions()
+    {
+        var jsonPath = await WriteRawJsonAsync(
+            "voice-channel-mention.json",
+            """
+            {
+              "guild": {
+                "id": "1",
+                "name": "Test Guild",
+                "iconUrl": ""
+              },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": "topic"
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "Voice channel mention: <#30>",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [],
+                  "stickers": [],
+                  "reactions": [],
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1,
+              "conversionData": {
+                "schemaVersion": 1,
+                "members": [],
+                "roles": [],
+                "channels": [
+                  {
+                    "id": "30",
+                    "name": "voice-room",
+                    "type": "GuildVoiceChat",
+                    "isVoice": true
+                  }
+                ]
+              }
+            }
+            """
+        );
+        var htmlOut = Path.Combine(_dir, "voice-channel-mention.html");
+
+        await ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark);
+
+        var text = Html.Parse(await File.ReadAllTextAsync(htmlOut)).Body?.TextContent;
+        text.Should().Contain("Voice channel mention: 🔊voice-room");
+        text.Should().NotContain("#voice-room");
     }
 
     [Fact]

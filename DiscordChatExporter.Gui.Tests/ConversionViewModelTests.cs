@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -36,6 +37,7 @@ public sealed class ConversionViewModelTests : IDisposable
     private string WriteJson(string fileName, string content)
     {
         var path = Path.Combine(_dir, fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(
             path,
             $$"""
@@ -92,6 +94,14 @@ public sealed class ConversionViewModelTests : IDisposable
         return path;
     }
 
+    private string WriteInvalidJson(string fileName)
+    {
+        var path = Path.Combine(_dir, fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{");
+        return path;
+    }
+
     private ConversionViewModel CreateViewModel() =>
         new(new DialogManager(), new LocalizationManager(new SettingsService()))
         {
@@ -125,6 +135,71 @@ public sealed class ConversionViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task Convert_uses_initial_sources_formats_and_output_folder()
+    {
+        var outputDir = Path.Combine(_dir, "output");
+        var changedOutputDir = Path.Combine(_dir, "changed-output");
+        Directory.CreateDirectory(outputDir);
+        Directory.CreateDirectory(changedOutputDir);
+
+        var firstJson = WriteInvalidJson(Path.Combine("sources", "first.json"));
+        var secondJson = WriteInvalidJson(Path.Combine("sources", "second.json"));
+        var lateJson = WriteInvalidJson(Path.Combine("sources", "late.json"));
+
+        var viewModel = CreateViewModel();
+        viewModel.OutputFolderPath = outputDir;
+        viewModel.IsCsvSelected = true;
+        viewModel.SourceFilePaths.Add(firstJson);
+        viewModel.SourceFilePaths.Add(secondJson);
+
+        var changedLiveState = false;
+        viewModel.Results.CollectionChanged += (_, _) =>
+        {
+            if (changedLiveState)
+                return;
+
+            changedLiveState = true;
+            viewModel.OutputFolderPath = changedOutputDir;
+            viewModel.IsCsvSelected = false;
+            viewModel.IsTxtSelected = true;
+            viewModel.SourceFilePaths.Add(lateJson);
+        };
+
+        var act = () => viewModel.ConvertCommand.ExecuteAsync(null);
+
+        await act.Should().NotThrowAsync();
+        viewModel.Results.Should().HaveCount(2);
+        viewModel.Results.Should().OnlyContain(r => r.Format == ExportFormat.Csv);
+        viewModel.Results
+            .Should()
+            .OnlyContain(r => Path.GetDirectoryName(r.OutputFilePath) == outputDir);
+        viewModel.Results.Should().NotContain(r => r.SourceFilePath == lateJson);
+    }
+
+    [Fact]
+    public async Task Convert_reports_conflicts_for_sources_that_would_write_same_output_path()
+    {
+        var firstJson = WriteJson(Path.Combine("first", "chat.json"), "from first json");
+        var secondJson = WriteJson(Path.Combine("second", "chat.json"), "from second json");
+        var viewModel = CreateViewModel();
+        viewModel.IsCsvSelected = true;
+        viewModel.SourceFilePaths.Add(firstJson);
+        viewModel.SourceFilePaths.Add(secondJson);
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        viewModel.Results.Should().HaveCount(2);
+        viewModel.Results.Should().OnlyContain(r => !r.IsSuccess);
+        viewModel.Results.Should().OnlyContain(r => r.Message.Contains("conflict", StringComparison.OrdinalIgnoreCase));
+        viewModel.Results
+            .Select(r => r.OutputFilePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Should()
+            .ContainSingle();
+        File.Exists(Path.Combine(_dir, "chat.csv")).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Convert_writes_distinct_outputs_for_html_dark_and_light()
     {
         var json = WriteJson("chat.json", "hello html");
@@ -140,5 +215,40 @@ public sealed class ConversionViewModelTests : IDisposable
         htmlResults.Should().HaveCount(2);
         foreach (var result in htmlResults)
             File.Exists(result.OutputFilePath).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Commands_that_mutate_conversion_state_are_disabled_while_busy()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SourceFilePaths.Add(WriteJson("chat.json", "hello"));
+        viewModel.IsCsvSelected = true;
+
+        viewModel.IsBusy = true;
+
+        viewModel.PickFilesCommand.CanExecute(null).Should().BeFalse();
+        viewModel.PickOutputFolderCommand.CanExecute(null).Should().BeFalse();
+        viewModel.ConvertCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Pick_output_folder_keeps_existing_path_when_picker_is_canceled()
+    {
+        const string ExistingOutputPath = "C:\\exports";
+        var viewModel = new ConversionViewModel(
+            new DialogManager(),
+            new LocalizationManager(new SettingsService()),
+            promptDirectoryPathAsync: _ => Task.FromResult<string?>(null),
+            promptMultipleFilePathsAsync: _ =>
+                Task.FromResult<IReadOnlyList<string>>([WriteJson("chat.json", "hello")])
+        )
+        {
+            OutputFolderPath = ExistingOutputPath,
+            IsHtmlDarkSelected = false,
+        };
+
+        await viewModel.PickOutputFolderCommand.ExecuteAsync(null);
+
+        viewModel.OutputFolderPath.Should().Be(ExistingOutputPath);
     }
 }

@@ -210,6 +210,8 @@ internal partial class HtmlMarkdownVisitor(
     )
     {
         var jumboClass = isJumbo ? "chatlog__emoji--large" : "";
+        var imageUrl =
+            context.TryGetEmojiImageUrl(emoji.Id, emoji.Name, emoji.IsAnimated) ?? emoji.ImageUrl;
 
         buffer.Append(
             // lang=html
@@ -219,7 +221,7 @@ internal partial class HtmlMarkdownVisitor(
                 class="chatlog__emoji {jumboClass}"
                 alt="{emoji.Name}"
                 title="{emoji.Code}"
-                src="{await context.ResolveAssetUrlAsync(emoji.ImageUrl, cancellationToken)}">
+                src="{await context.ResolveAssetUrlAsync(imageUrl, cancellationToken)}">
             """
         );
     }

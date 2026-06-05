@@ -266,6 +266,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             "title",
             await FormatMarkdownAsync(embed.Title ?? "", cancellationToken)
         );
+        _writer.WriteString("type", embed.Kind.ToString());
         _writer.WriteString("url", embed.Url);
         _writer.WriteString("timestamp", embed.Timestamp?.Pipe(Context.NormalizeDate));
         _writer.WriteString(
@@ -409,6 +410,8 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             _writer.WriteStartObject();
             _writer.WriteString("id", id.ToString());
             _writer.WriteString("name", channel.Name);
+            _writer.WriteString("type", channel.Kind.ToString());
+            _writer.WriteBoolean("isVoice", channel.IsVoice);
             _writer.WriteEndObject();
         }
         _writer.WriteEndArray();
@@ -592,6 +595,10 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             _writer.WriteEndObject();
         }
 
+        // Referenced message
+        if (message.ReferencedMessage is not null)
+            await WriteReferencedMessageAsync(message.ReferencedMessage, cancellationToken);
+
         // Forwarded message
         if (message.ForwardedMessage is not null)
         {
@@ -670,6 +677,83 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
 
         _writer.WriteEndObject();
         await _writer.FlushAsync(cancellationToken);
+    }
+
+    private async ValueTask WriteReferencedMessageAsync(
+        Message message,
+        CancellationToken cancellationToken = default
+    )
+    {
+        _writer.WriteStartObject("referencedMessage");
+
+        _writer.WriteString("id", message.Id.ToString());
+        _writer.WriteString("type", message.Kind.ToString());
+        _writer.WriteString("timestamp", Context.NormalizeDate(message.Timestamp));
+        _writer.WriteString(
+            "timestampEdited",
+            message.EditedTimestamp?.Pipe(Context.NormalizeDate)
+        );
+        _writer.WriteString(
+            "callEndedTimestamp",
+            message.CallEndedTimestamp?.Pipe(Context.NormalizeDate)
+        );
+        _writer.WriteBoolean("isPinned", message.IsPinned);
+        _writer.WriteString(
+            "content",
+            await FormatMarkdownAsync(message.Content, cancellationToken)
+        );
+
+        _writer.WritePropertyName("author");
+        await WriteUserAsync(message.Author, true, cancellationToken);
+
+        _writer.WriteStartArray("attachments");
+        foreach (var attachment in message.Attachments)
+            await WriteAttachmentAsync(attachment, cancellationToken);
+        _writer.WriteEndArray();
+
+        _writer.WriteStartArray("embeds");
+        foreach (var embed in message.Embeds)
+            await WriteEmbedAsync(embed, cancellationToken);
+        _writer.WriteEndArray();
+
+        _writer.WriteStartArray("stickers");
+        foreach (var sticker in message.Stickers)
+            await WriteStickerAsync(sticker, cancellationToken);
+        _writer.WriteEndArray();
+
+        _writer.WriteStartArray("reactions");
+        foreach (var reaction in message.Reactions)
+        {
+            _writer.WriteStartObject();
+            _writer.WritePropertyName("emoji");
+            await WriteEmojiAsync(reaction.Emoji, cancellationToken);
+            _writer.WriteNumber("count", reaction.Count);
+            _writer.WriteStartArray("users");
+            _writer.WriteEndArray();
+            _writer.WriteEndObject();
+        }
+        _writer.WriteEndArray();
+
+        _writer.WriteStartArray("mentions");
+        foreach (var user in message.MentionedUsers)
+            await WriteUserAsync(user, true, cancellationToken);
+        _writer.WriteEndArray();
+
+        _writer.WriteStartArray("inlineEmojis");
+        foreach (
+            var emoji in MarkdownParser
+                .ExtractEmojis(message.Content)
+                .DistinctBy(e => e.Name, StringComparer.Ordinal)
+        )
+        {
+            await WriteEmojiAsync(
+                new Emoji(emoji.Id, emoji.Name, emoji.IsAnimated),
+                cancellationToken
+            );
+        }
+        _writer.WriteEndArray();
+
+        _writer.WriteEndObject();
     }
 
     public override async ValueTask WritePostambleAsync(

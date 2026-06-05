@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
@@ -137,6 +139,13 @@ public sealed class JsonExportReaderSpecs : IDisposable
             }
         );
         await writer.WritePostambleAsync();
+        return path;
+    }
+
+    private async Task<string> WriteRawJsonAsync(string fileName, string json)
+    {
+        var path = Path.Combine(_dir, fileName);
+        await File.WriteAllTextAsync(path, json);
         return path;
     }
 
@@ -283,5 +292,287 @@ public sealed class JsonExportReaderSpecs : IDisposable
         reaction.Emoji.Id.Should().BeNull();
         reaction.Emoji.Name.Should().Be("🙂");
         reaction.Emoji.ImageUrl.Should().Be("emoji-local.png");
+    }
+
+    [Fact]
+    public async Task Reader_preserves_explicit_embed_kinds_from_json_export()
+    {
+        var path = Path.Combine(_dir, "embed-kinds.json");
+        var author = CreateUser(10, "alice");
+        var embeds = new[]
+        {
+            new Embed(
+                null,
+                EmbedKind.Image,
+                "https://cdn.example/image.png",
+                null,
+                null,
+                null,
+                null,
+                [],
+                null,
+                [new EmbedImage("https://cdn.example/image.png", "image-local.png", 640, 480)],
+                null,
+                null
+            ),
+            new Embed(
+                null,
+                EmbedKind.Video,
+                "https://cdn.example/video.mp4",
+                null,
+                null,
+                null,
+                null,
+                [],
+                null,
+                [],
+                new EmbedVideo("https://cdn.example/video.mp4", "video-local.mp4", 640, 480),
+                null
+            ),
+            new Embed(
+                null,
+                EmbedKind.Gifv,
+                "https://cdn.example/animation.gifv",
+                null,
+                null,
+                null,
+                null,
+                [],
+                null,
+                [],
+                new EmbedVideo(
+                    "https://cdn.example/animation.mp4",
+                    "animation-local.mp4",
+                    320,
+                    240
+                ),
+                null
+            ),
+            new Embed(
+                "link title",
+                EmbedKind.Link,
+                "https://example.com/page",
+                null,
+                null,
+                null,
+                "link body",
+                [],
+                null,
+                [],
+                null,
+                null
+            ),
+        };
+
+        await using (var writer = new JsonMessageWriter(File.Create(path), CreateContext(path)))
+        {
+            await writer.WritePreambleAsync();
+            await writer.WriteMessageAsync(
+                CreateMessage(1001, author, CreateUser(11, "bob")) with
+                {
+                    Embeds = embeds,
+                }
+            );
+            await writer.WritePostambleAsync();
+        }
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+        document
+            .RootElement.GetProperty("messages")[0]
+            .GetProperty("embeds")
+            .EnumerateArray()
+            .Select(embed => embed.GetProperty("type").GetString())
+            .Should()
+            .Equal("Image", "Video", "Gifv", "Link");
+
+        var parsed = await JsonExportReader.ParseAsync(path);
+
+        parsed
+            .Messages.Single()
+            .Embeds.Select(embed => embed.Kind)
+            .Should()
+            .Equal(embeds.Select(e => e.Kind));
+    }
+
+    [Fact]
+    public async Task Reader_infers_legacy_embed_kinds_when_type_is_missing()
+    {
+        var path = await WriteRawJsonAsync(
+            "legacy-embed-kinds.json",
+            """
+            {
+              "guild": {
+                "id": "1",
+                "name": "Test Guild",
+                "iconUrl": ""
+              },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": "topic"
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "legacy embeds",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [
+                    {
+                      "title": null,
+                      "url": "https://cdn.example/image.png",
+                      "timestamp": null,
+                      "description": null,
+                      "images": [
+                        {
+                          "url": "image-local.png",
+                          "canonicalUrl": "https://cdn.example/image.png",
+                          "width": 640,
+                          "height": 480
+                        }
+                      ],
+                      "fields": [],
+                      "inlineEmojis": []
+                    },
+                    {
+                      "title": null,
+                      "url": "https://cdn.example/video.mp4",
+                      "timestamp": null,
+                      "description": null,
+                      "video": {
+                        "url": "video-local.mp4",
+                        "canonicalUrl": "https://cdn.example/video.mp4",
+                        "width": 640,
+                        "height": 480
+                      },
+                      "images": [],
+                      "fields": [],
+                      "inlineEmojis": []
+                    },
+                    {
+                      "title": "link title",
+                      "url": "https://example.com/page",
+                      "timestamp": null,
+                      "description": "link body",
+                      "images": [],
+                      "fields": [],
+                      "inlineEmojis": []
+                    }
+                  ],
+                  "stickers": [],
+                  "reactions": [],
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+
+        var parsed = await JsonExportReader.ParseAsync(path);
+
+        parsed
+            .Messages.Single()
+            .Embeds.Select(embed => embed.Kind)
+            .Should()
+            .Equal(EmbedKind.Image, EmbedKind.Video, EmbedKind.Link);
+    }
+
+    public static IEnumerable<object[]> MalformedDceJsonCases()
+    {
+        yield return
+        [
+            "missing-guild-id.json",
+            """
+                {
+                  "guild": {
+                    "name": "Test Guild",
+                    "iconUrl": ""
+                  },
+                  "channel": {
+                    "id": "2",
+                    "type": "GuildTextChat",
+                    "categoryId": null,
+                    "category": null,
+                    "name": "test-channel",
+                    "topic": "topic"
+                  },
+                  "messages": []
+                }
+                """,
+        ];
+
+        yield return
+        [
+            "null-message-author.json",
+            """
+                {
+                  "guild": {
+                    "id": "1",
+                    "name": "Test Guild",
+                    "iconUrl": ""
+                  },
+                  "channel": {
+                    "id": "2",
+                    "type": "GuildTextChat",
+                    "categoryId": null,
+                    "category": null,
+                    "name": "test-channel",
+                    "topic": "topic"
+                  },
+                  "messages": [
+                    {
+                      "id": "1001",
+                      "type": "Default",
+                      "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                      "timestampEdited": null,
+                      "callEndedTimestamp": null,
+                      "isPinned": false,
+                      "content": "bad",
+                      "author": null,
+                      "attachments": [],
+                      "embeds": [],
+                      "stickers": [],
+                      "reactions": [],
+                      "mentions": [],
+                      "inlineEmojis": []
+                    }
+                  ]
+                }
+                """,
+        ];
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedDceJsonCases))]
+    public async Task Reader_wraps_malformed_dce_shaped_json_as_invalid_export(
+        string fileName,
+        string json
+    )
+    {
+        var path = await WriteRawJsonAsync(fileName, json);
+
+        await FluentActions
+            .Awaiting(() => JsonExportReader.ParseAsync(path).AsTask())
+            .Should()
+            .ThrowAsync<InvalidExportException>();
     }
 }

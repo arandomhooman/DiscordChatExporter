@@ -36,7 +36,10 @@ public class SqliteContinuationSpecs : IDisposable
         }
     }
 
-    private static ExportContext CreateContext(string outputPath)
+    private static ExportContext CreateContext(
+        string outputPath,
+        bool isReverseMessageOrder = false
+    )
     {
         var guild = new Guild(new Snowflake(1), "Test Guild", "");
         var channel = new Channel(
@@ -61,7 +64,7 @@ public class SqliteContinuationSpecs : IDisposable
             null,
             PartitionLimit.Null,
             MessageFilter.Null,
-            isReverseMessageOrder: false,
+            isReverseMessageOrder,
             shouldFormatMarkdown: false,
             shouldDownloadAssets: false,
             shouldReuseAssets: false,
@@ -163,6 +166,15 @@ public class SqliteContinuationSpecs : IDisposable
         return (long)command.ExecuteScalar()!;
     }
 
+    private static async Task ExecuteNonQueryAsync(string dbPath, string sql)
+    {
+        await using var connection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
+    }
+
     [Fact]
     public async Task Inspector_reads_channel_id_cutoff_and_count()
     {
@@ -186,6 +198,41 @@ public class SqliteContinuationSpecs : IDisposable
 
         cutoff.ExistingCount.Should().Be(0);
         cutoff.CutoffIsExact.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("after")]
+    [InlineData("before")]
+    public async Task Inspector_rejects_non_empty_malformed_date_bounds(string column)
+    {
+        var path = await WriteDbAsync("chat.db", (1001, "a"));
+        await ExecuteNonQueryAsync(path, $"UPDATE export_info SET {column} = 'not-a-date';");
+
+        var act = async () => await SqliteExportInspector.InspectAsync(path);
+
+        await act.Should().ThrowAsync<InvalidExportException>();
+    }
+
+    [Fact]
+    public async Task Inspector_treats_blank_date_bounds_as_missing()
+    {
+        var path = await WriteDbAsync("chat.db", (1001, "a"));
+        await ExecuteNonQueryAsync(path, "UPDATE export_info SET after = ' ', before = '';");
+
+        var cutoff = await SqliteExportInspector.InspectAsync(path);
+
+        cutoff.Before.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Inspector_detects_reverse_order_from_message_insertion_order()
+    {
+        var path = await WriteDbAsync("reverse.db", (1003, "c"), (1002, "b"), (1001, "a"));
+
+        var cutoff = await SqliteExportInspector.InspectAsync(path);
+
+        cutoff.Cutoff.Should().Be(new Snowflake(1001));
+        cutoff.IsChronological.Should().BeFalse();
     }
 
     [Fact]
@@ -309,6 +356,54 @@ public class SqliteContinuationSpecs : IDisposable
         Count(connection, "SELECT COUNT(*) FROM reactions WHERE message_id = '1003';")
             .Should()
             .Be(1);
+    }
+
+    [Fact]
+    public async Task Merger_ignores_orphan_dependent_rows_from_the_incoming_database()
+    {
+        var author = CreateUser(10, "alice");
+        var existing = await WriteMessageDbAsync("chat.db", CreateMessage(1003, author, "old"));
+        var incoming = await WriteMessageDbAsync(
+            "new.db",
+            CreateMessage(
+                1004,
+                author,
+                "new",
+                [CreateAttachment(5004)],
+                [CreateReaction("fire", 1)]
+            )
+        );
+        await ExecuteNonQueryAsync(
+            incoming,
+            """
+            INSERT INTO attachments (message_id, id, url, file_name, file_size_bytes)
+            VALUES ('9000', '7000', 'https://example.com/orphan.txt', 'orphan.txt', 1);
+            INSERT INTO reactions (message_id, emoji_id, emoji_name, emoji_code, is_animated, count)
+            VALUES ('9000', NULL, 'ghost', 'ghost', 0, 1);
+            INSERT INTO messages_fts (content, message_id)
+            VALUES ('orphan', '9000');
+            """
+        );
+        var cutoff = await SqliteExportInspector.InspectAsync(existing);
+
+        var total = await SqliteExportMerger.MergeAsync(
+            existing,
+            incoming,
+            cutoff,
+            DateTimeOffset.UnixEpoch
+        );
+
+        total.Should().Be(2);
+        using var connection = OpenReadOnly(existing);
+        Count(connection, "SELECT COUNT(*) FROM attachments WHERE message_id = '9000';")
+            .Should()
+            .Be(0);
+        Count(connection, "SELECT COUNT(*) FROM reactions WHERE message_id = '9000';")
+            .Should()
+            .Be(0);
+        Count(connection, "SELECT COUNT(*) FROM messages_fts WHERE message_id = '9000';")
+            .Should()
+            .Be(0);
     }
 
     [Fact]

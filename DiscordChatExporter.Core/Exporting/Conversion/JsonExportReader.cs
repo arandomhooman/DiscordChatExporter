@@ -56,10 +56,18 @@ public static class JsonExportReader
 
             var guild = ParseGuild(guildJson);
             var channel = ParseChannel(channelJson, guild.Id);
-            var messages = messagesJson.EnumerateArray().Select(ParseMessage).ToArray();
+            var messages = RelinkReferencedMessages(
+                messagesJson.EnumerateArray().Select(ParseMessage).ToArray()
+            );
+            var inlineEmojis = messagesJson
+                .EnumerateArray()
+                .SelectMany(ParseInlineEmojis)
+                .DistinctBy(emoji => (emoji.Id, emoji.Name, emoji.IsAnimated))
+                .ToArray();
             var conversionData = root.TryGetProperty("conversionData", out var conversionDataJson)
                 ? ParseConversionData(conversionDataJson)
                 : null;
+            conversionData = MergeConversionData(conversionData, inlineEmojis);
 
             return new ParsedExport(guild, channel, messages, conversionData);
         }
@@ -73,6 +81,9 @@ public static class JsonExportReader
                         or UnauthorizedAccessException
                         or JsonException
                         or FormatException
+                        or KeyNotFoundException
+                        or InvalidOperationException
+                        or OverflowException
             )
         {
             throw new InvalidExportException($"'{filePath}' is not a valid JSON chat export.", ex);
@@ -136,7 +147,9 @@ public static class JsonExportReader
             json.TryGetProperty("reference", out var referenceJson)
                 ? ParseMessageReference(referenceJson)
                 : null,
-            null,
+            json.TryGetProperty("referencedMessage", out var referencedJson)
+                ? ParseMessage(referencedJson)
+                : null,
             json.TryGetProperty("forwardedMessage", out var forwardedJson)
                 ? ParseMessageSnapshot(forwardedJson)
                 : null,
@@ -172,7 +185,7 @@ public static class JsonExportReader
     private static Embed ParseEmbed(JsonElement json) =>
         new(
             GetStringOrNull(json, "title"),
-            EmbedKind.Rich,
+            ParseEnum(GetStringOrNull(json, "type"), InferLegacyEmbedKind(json)),
             GetStringOrNull(json, "url"),
             ParseDateOrNull(json, "timestamp"),
             ParseColor(GetStringOrNull(json, "color")),
@@ -184,6 +197,59 @@ public static class JsonExportReader
             json.TryGetProperty("video", out var video) ? ParseEmbedVideo(video) : null,
             json.TryGetProperty("footer", out var footer) ? ParseEmbedFooter(footer) : null
         );
+
+    private static EmbedKind InferLegacyEmbedKind(JsonElement json)
+    {
+        if (json.TryGetProperty("video", out var video) && video.ValueKind == JsonValueKind.Object)
+            return HasGifvUrl(json) ? EmbedKind.Gifv : EmbedKind.Video;
+
+        if (HasImage(json) && IsBareMediaEmbed(json))
+            return EmbedKind.Image;
+
+        return !string.IsNullOrWhiteSpace(GetStringOrNull(json, "url"))
+            ? EmbedKind.Link
+            : EmbedKind.Rich;
+    }
+
+    private static bool HasGifvUrl(JsonElement json)
+    {
+        var urls = new[]
+        {
+            GetStringOrNull(json, "url"),
+            json.TryGetProperty("video", out var video) ? GetStringOrNull(video, "url") : null,
+            json.TryGetProperty("video", out video) ? GetStringOrNull(video, "canonicalUrl") : null,
+        };
+
+        return urls.Any(url =>
+            url?.EndsWith(".gifv", StringComparison.OrdinalIgnoreCase) == true
+            || url?.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) == true
+        );
+    }
+
+    private static bool HasImage(JsonElement json) =>
+        json.TryGetProperty("image", out var image) && image.ValueKind == JsonValueKind.Object
+        || json.TryGetProperty("thumbnail", out var thumbnail)
+            && thumbnail.ValueKind == JsonValueKind.Object
+        || json.TryGetProperty("images", out var images)
+            && images.ValueKind == JsonValueKind.Array
+            && images.GetArrayLength() > 0;
+
+    private static bool IsBareMediaEmbed(JsonElement json) =>
+        string.IsNullOrWhiteSpace(GetStringOrNull(json, "title"))
+        && string.IsNullOrWhiteSpace(GetStringOrNull(json, "description"))
+        && !HasNonNullProperty(json, "author")
+        && !HasNonNullProperty(json, "footer")
+        && !HasNonNullProperty(json, "color")
+        && !HasNonNullProperty(json, "timestamp")
+        && (
+            !json.TryGetProperty("fields", out var fields)
+            || fields.ValueKind != JsonValueKind.Array
+            || fields.GetArrayLength() == 0
+        );
+
+    private static bool HasNonNullProperty(JsonElement json, string propertyName) =>
+        json.TryGetProperty(propertyName, out var property)
+        && property.ValueKind != JsonValueKind.Null;
 
     private static EmbedAuthor ParseEmbedAuthor(JsonElement json) =>
         new(
@@ -295,10 +361,73 @@ public static class JsonExportReader
                 "channels",
                 channel => new ConversionChannel(
                     GetString(channel, "id"),
-                    GetString(channel, "name")
+                    GetString(channel, "name"),
+                    GetStringOrNull(channel, "type"),
+                    GetBoolean(channel, "isVoice")
                 )
-            )
+            ),
+            ParseArray(json, "emojis", ParseConversionEmoji)
         );
+
+    private static ConversionEmoji ParseConversionEmoji(JsonElement json) =>
+        new(
+            GetStringOrNull(json, "id"),
+            GetString(json, "name"),
+            GetBoolean(json, "isAnimated"),
+            GetString(json, "imageUrl")
+        );
+
+    private static IReadOnlyList<ConversionEmoji> ParseInlineEmojis(JsonElement json)
+    {
+        var emojis = new List<ConversionEmoji>();
+
+        emojis.AddRange(ParseArray(json, "inlineEmojis", ParseConversionEmoji));
+
+        foreach (var embed in ParseArray(json, "embeds", embed => embed))
+            emojis.AddRange(ParseArray(embed, "inlineEmojis", ParseConversionEmoji));
+
+        return emojis.Where(emoji => !string.IsNullOrWhiteSpace(emoji.ImageUrl)).ToArray();
+    }
+
+    private static ConversionData? MergeConversionData(
+        ConversionData? conversionData,
+        IReadOnlyList<ConversionEmoji> inlineEmojis
+    )
+    {
+        if (inlineEmojis.Count <= 0)
+            return conversionData;
+
+        if (conversionData is null)
+            return new ConversionData([], [], [], inlineEmojis);
+
+        return conversionData with
+        {
+            Emojis = conversionData
+                .Emojis.Concat(inlineEmojis)
+                .DistinctBy(emoji => (emoji.Id, emoji.Name, emoji.IsAnimated))
+                .ToArray(),
+        };
+    }
+
+    private static IReadOnlyList<Message> RelinkReferencedMessages(IReadOnlyList<Message> messages)
+    {
+        var messagesById = messages
+            .GroupBy(message => message.Id)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        return messages
+            .Select(message =>
+                message is { ReferencedMessage: null, Reference.MessageId: { } referencedMessageId }
+                && referencedMessageId != message.Id
+                && messagesById.TryGetValue(referencedMessageId, out var referencedMessage)
+                    ? message with
+                    {
+                        ReferencedMessage = referencedMessage,
+                    }
+                    : message
+            )
+            .ToArray();
+    }
 
     private static IReadOnlyList<T> ParseArray<T>(
         JsonElement json,

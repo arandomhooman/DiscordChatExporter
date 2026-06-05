@@ -15,6 +15,7 @@ using DiscordChatExporter.Core.Utils;
 using Gress;
 using JsonExtensions.Http;
 using JsonExtensions.Reading;
+using Polly;
 using PowerKit.Extensions;
 
 namespace DiscordChatExporter.Core.Discord;
@@ -25,9 +26,44 @@ public class DiscordClient(
 )
 {
     private readonly Uri _baseUri = new("https://discord.com/api/v10/", UriKind.Absolute);
+    private readonly HttpClient _httpClient = Http.Client;
+    private readonly Func<TimeSpan, CancellationToken, ValueTask> _delayAsync = static (
+        delay,
+        cancellationToken
+    ) => new ValueTask(Task.Delay(delay, cancellationToken));
     private TokenKind? _resolvedTokenKind;
 
     public event EventHandler<RateLimitState>? RateLimitChanged;
+
+    internal DiscordClient(
+        string tokenOverride,
+        RateLimitPreference rateLimitPreferenceOverride,
+        HttpClient httpClient,
+        Func<TimeSpan, CancellationToken, ValueTask>? delayAsync = null
+    )
+        : this(tokenOverride, rateLimitPreferenceOverride)
+    {
+        _httpClient = httpClient;
+
+        if (delayAsync is not null)
+            _delayAsync = delayAsync;
+    }
+
+    private async ValueTask WaitForRateLimitAsync(
+        TimeSpan delay,
+        CancellationToken cancellationToken
+    )
+    {
+        RateLimitChanged?.Invoke(this, new RateLimitState(true, delay));
+        try
+        {
+            await _delayAsync(delay, cancellationToken);
+        }
+        finally
+        {
+            RateLimitChanged?.Invoke(this, new RateLimitState(false, TimeSpan.Zero));
+        }
+    }
 
     private async ValueTask<HttpResponseMessage> GetResponseAsync(
         string url,
@@ -35,76 +71,78 @@ public class DiscordClient(
         CancellationToken cancellationToken = default
     )
     {
-        return await Http.ResponseResiliencePipeline.ExecuteAsync(
-            async innerCancellationToken =>
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_baseUri, url));
+        var resilienceContext = ResilienceContextPool.Shared.Get(cancellationToken);
+        resilienceContext.Properties.Set(Http.RateLimitDelayHandlerKey, WaitForRateLimitAsync);
 
-                // Don't validate because the token can have special characters
-                // https://github.com/Tyrrrz/DiscordChatExporter/issues/828
-                request.Headers.TryAddWithoutValidation(
-                    "Authorization",
-                    tokenKind == TokenKind.Bot ? $"Bot {token}" : token
-                );
-
-                var response = await Http.Client.SendAsync(
-                    request,
-                    HttpCompletionOption.ResponseHeadersRead,
-                    innerCancellationToken
-                );
-
-                // Discord has advisory rate limits (communicated via response headers), but they are typically
-                // way stricter than the actual rate limits enforced by the server.
-                // The user may choose to ignore the advisory rate limits and only retry on hard rate limits,
-                // if they want to prioritize speed over compliance (and safety of their account/bot).
-                // https://github.com/Tyrrrz/DiscordChatExporter/issues/1021
-                if (rateLimitPreference.IsRespectedFor(tokenKind))
+        try
+        {
+            return await Http.ResponseResiliencePipeline.ExecuteAsync(
+                async innerContext =>
                 {
-                    var remainingRequestCount = response
-                        .Headers.TryGetValue("X-RateLimit-Remaining")
-                        ?.Pipe(s => int.ParseOrNull(s, CultureInfo.InvariantCulture));
+                    using var request = new HttpRequestMessage(
+                        HttpMethod.Get,
+                        new Uri(_baseUri, url)
+                    );
 
-                    var resetAfterDelay = response
-                        .Headers.TryGetValue("X-RateLimit-Reset-After")
-                        ?.Pipe(s => double.ParseOrNull(s, CultureInfo.InvariantCulture))
-                        ?.Pipe(TimeSpan.FromSeconds);
+                    // Don't validate because the token can have special characters
+                    // https://github.com/Tyrrrz/DiscordChatExporter/issues/828
+                    request.Headers.TryAddWithoutValidation(
+                        "Authorization",
+                        tokenKind == TokenKind.Bot ? $"Bot {token}" : token
+                    );
 
-                    // If this was the last request available before hitting the rate limit,
-                    // wait out the reset time so that future requests can succeed.
-                    // This may add an unnecessary delay in case the user doesn't intend to
-                    // make any more requests, but implementing a smarter solution would
-                    // require properly keeping track of Discord's global/per-route/per-resource
-                    // rate limits and that's just way too much effort.
-                    // https://discord.com/developers/docs/topics/rate-limits
-                    if (remainingRequestCount <= 0 && resetAfterDelay is not null)
+                    var response = await _httpClient.SendAsync(
+                        request,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        innerContext.CancellationToken
+                    );
+
+                    // Discord has advisory rate limits (communicated via response headers), but they are typically
+                    // way stricter than the actual rate limits enforced by the server.
+                    // The user may choose to ignore the advisory rate limits and only retry on hard rate limits,
+                    // if they want to prioritize speed over compliance (and safety of their account/bot).
+                    // https://github.com/Tyrrrz/DiscordChatExporter/issues/1021
+                    if (rateLimitPreference.IsRespectedFor(tokenKind))
                     {
-                        var delay =
-                            // Adding a small buffer to the reset time reduces the chance of getting
-                            // rate limited again, because it allows for more requests to be released.
-                            (resetAfterDelay.Value + TimeSpan.FromSeconds(1))
-                            // Sometimes Discord returns an absurdly high value for the reset time, which
-                            // is not actually enforced by the server. So we cap it at a reasonable value.
-                            .Clamp(TimeSpan.Zero, TimeSpan.FromSeconds(60));
+                        var remainingRequestCount = response
+                            .Headers.TryGetValue("X-RateLimit-Remaining")
+                            ?.Pipe(s => int.ParseOrNull(s, CultureInfo.InvariantCulture));
 
-                        RateLimitChanged?.Invoke(this, new RateLimitState(true, delay));
-                        try
+                        var resetAfterDelay = response
+                            .Headers.TryGetValue("X-RateLimit-Reset-After")
+                            ?.Pipe(s => double.ParseOrNull(s, CultureInfo.InvariantCulture))
+                            ?.Pipe(TimeSpan.FromSeconds);
+
+                        // If this was the last request available before hitting the rate limit,
+                        // wait out the reset time so that future requests can succeed.
+                        // This may add an unnecessary delay in case the user doesn't intend to
+                        // make any more requests, but implementing a smarter solution would
+                        // require properly keeping track of Discord's global/per-route/per-resource
+                        // rate limits and that's just way too much effort.
+                        // https://discord.com/developers/docs/topics/rate-limits
+                        if (remainingRequestCount <= 0 && resetAfterDelay is not null)
                         {
-                            await Task.Delay(delay, innerCancellationToken);
-                        }
-                        finally
-                        {
-                            RateLimitChanged?.Invoke(
-                                this,
-                                new RateLimitState(false, TimeSpan.Zero)
-                            );
+                            var delay =
+                                // Adding a small buffer to the reset time reduces the chance of getting
+                                // rate limited again, because it allows for more requests to be released.
+                                (resetAfterDelay.Value + TimeSpan.FromSeconds(1))
+                                // Sometimes Discord returns an absurdly high value for the reset time, which
+                                // is not actually enforced by the server. So we cap it at a reasonable value.
+                                .Clamp(TimeSpan.Zero, TimeSpan.FromSeconds(60));
+
+                            await WaitForRateLimitAsync(delay, innerContext.CancellationToken);
                         }
                     }
-                }
 
-                return response;
-            },
-            cancellationToken
-        );
+                    return response;
+                },
+                resilienceContext
+            );
+        }
+        finally
+        {
+            ResilienceContextPool.Shared.Return(resilienceContext);
+        }
     }
 
     private async ValueTask<TokenKind> ResolveTokenKindAsync(

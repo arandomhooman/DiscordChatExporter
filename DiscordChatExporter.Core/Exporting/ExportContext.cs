@@ -20,6 +20,10 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
     private readonly Dictionary<Snowflake, Member?> _membersById = new();
     private readonly Dictionary<Snowflake, Channel?> _channelsById = new();
     private readonly Dictionary<Snowflake, Role> _rolesById = new();
+    private readonly Dictionary<
+        (Snowflake? Id, string Name, bool IsAnimated),
+        string
+    > _emojiImageUrlsByKey = new();
 
     private readonly ExportAssetDownloader _assetDownloader = new(
         request.AssetsDirPath,
@@ -135,6 +139,17 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
 
     public Role? TryGetRole(Snowflake id) => _rolesById.GetValueOrDefault(id);
 
+    public string? TryGetEmojiImageUrl(Snowflake? id, string name, bool isAnimated) =>
+        _emojiImageUrlsByKey.GetValueOrDefault((id, name, isAnimated))
+        ?? (
+            id is not null
+                ? _emojiImageUrlsByKey
+                    .Where(e => e.Key.Id == id)
+                    .Select(e => e.Value)
+                    .FirstOrDefault()
+                : null
+        );
+
     public IReadOnlyList<Role> GetUserRoles(Snowflake id) =>
         TryGetMember(id)
             ?.RoleIds.Select(TryGetRole)
@@ -160,9 +175,10 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
         foreach (var channel in data.Channels)
         {
             var id = ParseSnowflake(channel.Id);
+            var kind = ParseChannelKind(channel);
             _channelsById[id] = new Channel(
                 id,
-                ChannelKind.GuildTextChat,
+                kind,
                 Request.Guild.Id,
                 null,
                 channel.Name,
@@ -172,6 +188,15 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
                 false,
                 null
             );
+        }
+
+        foreach (var emoji in data.Emojis)
+        {
+            if (string.IsNullOrWhiteSpace(emoji.ImageUrl))
+                continue;
+
+            Snowflake? id = !string.IsNullOrWhiteSpace(emoji.Id) ? ParseSnowflake(emoji.Id) : null;
+            _emojiImageUrlsByKey[(id, emoji.Name, emoji.IsAnimated)] = emoji.ImageUrl;
         }
 
         foreach (var member in data.Members)
@@ -187,6 +212,19 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
 
     private static Snowflake ParseSnowflake(string value) =>
         new(ulong.Parse(value, CultureInfo.InvariantCulture));
+
+    private static ChannelKind ParseChannelKind(ConversionChannel channel)
+    {
+        if (
+            !string.IsNullOrWhiteSpace(channel.Type)
+            && Enum.TryParse<ChannelKind>(channel.Type, true, out var kind)
+        )
+        {
+            return kind;
+        }
+
+        return channel.IsVoice ? ChannelKind.GuildVoiceChat : ChannelKind.GuildTextChat;
+    }
 
     private static Color? ParseColor(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : ColorTranslator.FromHtml(value);

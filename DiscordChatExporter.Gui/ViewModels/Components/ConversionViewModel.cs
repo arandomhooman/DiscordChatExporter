@@ -16,9 +16,24 @@ namespace DiscordChatExporter.Gui.ViewModels.Components;
 
 public sealed partial class ConversionViewModel(
     DialogManager dialogManager,
-    LocalizationManager localizationManager
+    LocalizationManager localizationManager,
+    Func<FilePickerFileType[], Task<IReadOnlyList<string>>>? promptMultipleFilePathsAsync = null,
+    Func<string, Task<string?>>? promptDirectoryPathAsync = null
 ) : ViewModelBase
 {
+    private readonly Func<
+        FilePickerFileType[],
+        Task<IReadOnlyList<string>>
+    > _promptMultipleFilePathsAsync =
+        promptMultipleFilePathsAsync
+        ?? (fileTypes => dialogManager.PromptMultipleFilePathsAsync(fileTypes));
+    private readonly Func<string, Task<string?>> _promptDirectoryPathAsync =
+        promptDirectoryPathAsync
+        ?? (defaultDirPath => dialogManager.PromptDirectoryPathAsync(defaultDirPath));
+
+    private const string ConvertedMessage = "Converted";
+    private const string OutputPathConflictMessage = "Output path conflict";
+
     public LocalizationManager LocalizationManager { get; } = localizationManager;
 
     public event EventHandler? BackRequested;
@@ -53,14 +68,25 @@ public sealed partial class ConversionViewModel(
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ConvertCommand))]
+    [NotifyCanExecuteChangedFor(nameof(PickFilesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(PickOutputFolderCommand))]
+    [NotifyPropertyChangedFor(nameof(CanEditConversionState))]
     public partial bool IsBusy { get; set; }
 
-    [RelayCommand]
+    public bool CanEditConversionState => !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanEditConversionState))]
     private async Task PickFilesAsync()
     {
-        var paths = await dialogManager.PromptMultipleFilePathsAsync([
+        if (IsBusy)
+            return;
+
+        var paths = await _promptMultipleFilePathsAsync([
             new FilePickerFileType("JSON exports") { Patterns = ["*.json"] },
         ]);
+
+        if (IsBusy)
+            return;
 
         foreach (
             var path in paths.Where(p =>
@@ -72,10 +98,17 @@ public sealed partial class ConversionViewModel(
         ConvertCommand.NotifyCanExecuteChanged();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditConversionState))]
     private async Task PickOutputFolderAsync()
     {
-        OutputFolderPath = await dialogManager.PromptDirectoryPathAsync(OutputFolderPath ?? "");
+        if (IsBusy)
+            return;
+
+        var outputFolderPath = await _promptDirectoryPathAsync(OutputFolderPath ?? "");
+        if (IsBusy || outputFolderPath is null)
+            return;
+
+        OutputFolderPath = outputFolderPath;
     }
 
     private bool CanConvert() =>
@@ -87,15 +120,62 @@ public sealed partial class ConversionViewModel(
     [RelayCommand(CanExecute = nameof(CanConvert))]
     private async Task ConvertAsync()
     {
-        if (string.IsNullOrWhiteSpace(OutputFolderPath))
+        if (IsBusy)
+            return;
+
+        var outputFolderPath = OutputFolderPath;
+        var sourceFilePaths = SourceFilePaths.ToArray();
+        var targetFormats = GetTargetFormats().ToArray();
+
+        if (
+            string.IsNullOrWhiteSpace(outputFolderPath)
+            || sourceFilePaths.Length <= 0
+            || targetFormats.Length <= 0
+        )
             return;
 
         IsBusy = true;
         Results.Clear();
         try
         {
-            foreach (var sourcePath in SourceFilePaths)
+            var conversionJobs = CreateConversionJobs(
+                sourceFilePaths,
+                targetFormats,
+                outputFolderPath
+            );
+            var conflictingOutputPaths = conversionJobs
+                .GroupBy(j => j.OutputFilePath, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var sourceJobs in conversionJobs.GroupBy(j => j.SourceIndex))
             {
+                var sourcePath = sourceJobs.First().SourceFilePath;
+                var conflictJobs = sourceJobs
+                    .Where(j => conflictingOutputPaths.Contains(j.OutputFilePath))
+                    .ToArray();
+                var remainingJobs = sourceJobs
+                    .Where(j => !conflictingOutputPaths.Contains(j.OutputFilePath))
+                    .ToArray();
+
+                foreach (var job in conflictJobs)
+                {
+                    Results.Add(
+                        new ConversionResultRow(
+                            job.SourceFilePath,
+                            job.OutputFilePath,
+                            job.Format,
+                            false,
+                            false,
+                            OutputPathConflictMessage
+                        )
+                    );
+                }
+
+                if (remainingJobs.Length <= 0)
+                    continue;
+
                 bool hasConversionData;
                 try
                 {
@@ -104,13 +184,13 @@ public sealed partial class ConversionViewModel(
                 }
                 catch (Exception ex)
                 {
-                    foreach (var format in GetTargetFormats())
+                    foreach (var job in remainingJobs)
                     {
                         Results.Add(
                             new ConversionResultRow(
-                                sourcePath,
-                                GetOutputPath(sourcePath, format),
-                                format,
+                                job.SourceFilePath,
+                                job.OutputFilePath,
+                                job.Format,
                                 false,
                                 false,
                                 ex.Message
@@ -121,21 +201,23 @@ public sealed partial class ConversionViewModel(
                     continue;
                 }
 
-                foreach (var format in GetTargetFormats())
+                foreach (var job in remainingJobs)
                 {
-                    var outputPath = GetOutputPath(sourcePath, format);
-
                     try
                     {
-                        await ExportConverter.ConvertAsync(sourcePath, outputPath, format);
+                        await ExportConverter.ConvertAsync(
+                            job.SourceFilePath,
+                            job.OutputFilePath,
+                            job.Format
+                        );
                         Results.Add(
                             new ConversionResultRow(
-                                sourcePath,
-                                outputPath,
-                                format,
+                                job.SourceFilePath,
+                                job.OutputFilePath,
+                                job.Format,
                                 hasConversionData,
                                 true,
-                                "Converted"
+                                ConvertedMessage
                             )
                         );
                     }
@@ -143,9 +225,9 @@ public sealed partial class ConversionViewModel(
                     {
                         Results.Add(
                             new ConversionResultRow(
-                                sourcePath,
-                                outputPath,
-                                format,
+                                job.SourceFilePath,
+                                job.OutputFilePath,
+                                job.Format,
                                 hasConversionData,
                                 false,
                                 ex.Message
@@ -178,7 +260,28 @@ public sealed partial class ConversionViewModel(
             yield return ExportFormat.Db;
     }
 
-    private string GetOutputPath(string sourcePath, ExportFormat format)
+    private static IReadOnlyList<ConversionJob> CreateConversionJobs(
+        IReadOnlyList<string> sourceFilePaths,
+        IReadOnlyList<ExportFormat> targetFormats,
+        string outputFolderPath
+    ) =>
+        sourceFilePaths
+            .SelectMany(
+                (sourcePath, sourceIndex) =>
+                    targetFormats.Select(format => new ConversionJob(
+                        sourceIndex,
+                        sourcePath,
+                        GetOutputPath(outputFolderPath, sourcePath, format),
+                        format
+                    ))
+            )
+            .ToArray();
+
+    private static string GetOutputPath(
+        string outputFolderPath,
+        string sourcePath,
+        ExportFormat format
+    )
     {
         var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(sourcePath);
         var formatSuffix = format switch
@@ -189,10 +292,17 @@ public sealed partial class ConversionViewModel(
         };
 
         return Path.Combine(
-            OutputFolderPath ?? "",
+            outputFolderPath,
             fileNameWithoutExtension + formatSuffix + "." + format.GetFileExtension()
         );
     }
+
+    private sealed record ConversionJob(
+        int SourceIndex,
+        string SourceFilePath,
+        string OutputFilePath,
+        ExportFormat Format
+    );
 }
 
 public sealed record ConversionResultRow(

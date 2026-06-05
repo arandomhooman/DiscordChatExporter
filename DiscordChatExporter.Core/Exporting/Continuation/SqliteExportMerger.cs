@@ -51,12 +51,23 @@ public static class SqliteExportMerger
                     INSERT OR IGNORE INTO main.messages
                         SELECT * FROM incoming.messages WHERE CAST(id AS INTEGER) > $cutoff;
                     INSERT INTO main.attachments
-                        SELECT * FROM incoming.attachments WHERE CAST(message_id AS INTEGER) > $cutoff;
+                        SELECT a.* FROM incoming.attachments AS a
+                        WHERE EXISTS (
+                            SELECT 1 FROM incoming.messages AS m
+                            WHERE m.id = a.message_id AND CAST(m.id AS INTEGER) > $cutoff
+                        );
                     INSERT INTO main.reactions
-                        SELECT * FROM incoming.reactions WHERE CAST(message_id AS INTEGER) > $cutoff;
+                        SELECT r.* FROM incoming.reactions AS r
+                        WHERE EXISTS (
+                            SELECT 1 FROM incoming.messages AS m
+                            WHERE m.id = r.message_id AND CAST(m.id AS INTEGER) > $cutoff
+                        );
                     INSERT INTO main.messages_fts (content, message_id)
-                        SELECT content, message_id FROM incoming.messages_fts
-                        WHERE CAST(message_id AS INTEGER) > $cutoff;
+                        SELECT f.content, f.message_id FROM incoming.messages_fts AS f
+                        WHERE EXISTS (
+                            SELECT 1 FROM incoming.messages AS m
+                            WHERE m.id = f.message_id AND CAST(m.id AS INTEGER) > $cutoff
+                        );
                     """;
                 copy.Parameters.AddWithValue("$cutoff", (long)cutoff.Cutoff.Value);
                 await copy.ExecuteNonQueryAsync(cancellationToken);

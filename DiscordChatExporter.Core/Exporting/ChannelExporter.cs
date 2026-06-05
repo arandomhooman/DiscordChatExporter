@@ -65,31 +65,27 @@ public class ChannelExporter(DiscordClient discord)
                 );
             }
 
-            var currentFraction = Percentage.FromFraction(0);
-            var messagesRead = 0L;
-            var percentageProgress = new Progress<Percentage>(fraction =>
-                currentFraction = fraction
-            );
+            var progressState = new ExportProgressState();
 
             var messages = !request.IsReverseMessageOrder
                 ? discord.GetMessagesAsync(
                     request.Channel.Id,
                     request.After,
                     request.Before,
-                    percentageProgress,
+                    progressState,
                     cancellationToken
                 )
                 : discord.GetMessagesInReverseAsync(
                     request.Channel.Id,
                     request.After,
                     request.Before,
-                    percentageProgress,
+                    progressState,
                     cancellationToken
                 );
 
             await foreach (var message in messages)
             {
-                ReportWalkedMessage(message, currentFraction, progress, ref messagesRead);
+                progressState.ReportWalkedMessage(message, progress);
 
                 try
                 {
@@ -124,6 +120,22 @@ public class ChannelExporter(DiscordClient discord)
             messageExporter.MessagesExported,
             context.DownloadedAssetCount
         );
+    }
+
+    internal sealed class ExportProgressState : IProgress<Percentage>
+    {
+        private Percentage _currentFraction = Percentage.FromFraction(0);
+        private long _messagesRead;
+
+        public void Report(Percentage value) => _currentFraction = value;
+
+        public void ReportWalkedMessage(Message message, IProgress<ExportProgress>? progress) =>
+            ChannelExporter.ReportWalkedMessage(
+                message,
+                _currentFraction,
+                progress,
+                ref _messagesRead
+            );
     }
 
     internal static void ReportWalkedMessage(

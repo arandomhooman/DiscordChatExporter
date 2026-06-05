@@ -5,10 +5,18 @@ namespace DiscordChatExporter.Core.Exporting.Conversion;
 public sealed record ConversionData(
     IReadOnlyList<ConversionMember> Members,
     IReadOnlyList<ConversionRole> Roles,
-    IReadOnlyList<ConversionChannel> Channels
+    IReadOnlyList<ConversionChannel> Channels,
+    IReadOnlyList<ConversionEmoji> Emojis
 )
 {
     public const int CurrentSchemaVersion = 1;
+
+    public ConversionData(
+        IReadOnlyList<ConversionMember> members,
+        IReadOnlyList<ConversionRole> roles,
+        IReadOnlyList<ConversionChannel> channels
+    )
+        : this(members, roles, channels, []) { }
 }
 
 public sealed record ConversionMember(
@@ -21,4 +29,11 @@ public sealed record ConversionMember(
 
 public sealed record ConversionRole(string Id, string Name, string? ColorHex, int Position);
 
-public sealed record ConversionChannel(string Id, string Name);
+public sealed record ConversionChannel(
+    string Id,
+    string Name,
+    string? Type = null,
+    bool IsVoice = false
+);
+
+public sealed record ConversionEmoji(string? Id, string Name, bool IsAnimated, string ImageUrl);

@@ -39,6 +39,8 @@ namespace DiscordChatExporter.Gui.ViewModels.Components;
 
 public partial class DashboardViewModel : ViewModelBase
 {
+    private const double IncompleteProgressCeiling = 0.999;
+
     private readonly ViewModelManager _viewModelManager;
     private readonly SnackbarManager _snackbarManager;
     private readonly DialogManager _dialogManager;
@@ -544,10 +546,11 @@ public partial class DashboardViewModel : ViewModelBase
 
         var correctedTotal = Math.Max(estimatedTotal.Value, messagesRead);
         var countFraction = correctedTotal > 0 ? (double)messagesRead / correctedTotal : 0;
-        DisplayedProgressFraction = Math.Max(
-            DisplayedProgressFraction,
-            Math.Clamp(countFraction, 0, 1)
+        var displayedFraction = Math.Min(
+            Math.Clamp(countFraction, 0, 1),
+            IncompleteProgressCeiling
         );
+        DisplayedProgressFraction = Math.Max(DisplayedProgressFraction, displayedFraction);
     }
 
     private void ApplyExportProgress(int index, ExportProgress progress)
@@ -569,14 +572,23 @@ public partial class DashboardViewModel : ViewModelBase
 
         if (estimatedTotal is not null)
             UpdateDisplayedProgressFraction(messagesRead, estimatedTotal);
-        else
-            DisplayedProgressFraction = progress.Fraction.Fraction;
 
         UpdateProgressStatusText(messagesRead, currentTimestamp);
         UpdateEta();
     }
 
-    private void MarkExportProgressCompleted(int index)
+    private static void RunOrPostToUiThread(Action action)
+    {
+        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            action();
+        else
+            Avalonia.Threading.Dispatcher.UIThread.Post(action);
+    }
+
+    private void MarkExportProgressCompleted(int index) =>
+        RunOrPostToUiThread(() => MarkExportProgressCompletedOnUiThread(index));
+
+    private void MarkExportProgressCompletedOnUiThread(int index)
     {
         var isRunCompleted = false;
 

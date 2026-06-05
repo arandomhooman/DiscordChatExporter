@@ -137,10 +137,10 @@ public sealed class JsonConversionDataSpecs : IDisposable
         );
         var channel = new Channel(
             new Snowflake(30),
-            ChannelKind.GuildTextChat,
+            ChannelKind.GuildVoiceChat,
             new Snowflake(1),
             null,
-            "other-channel",
+            "voice-channel",
             0,
             null,
             null,
@@ -182,6 +182,18 @@ public sealed class JsonConversionDataSpecs : IDisposable
             .GetProperty("name")
             .GetString()
             .Should()
-            .Be("other-channel");
+            .Be("voice-channel");
+        conversionData
+            .GetProperty("channels")[0]
+            .GetProperty("type")
+            .GetString()
+            .Should()
+            .Be("GuildVoiceChat");
+        conversionData
+            .GetProperty("channels")[0]
+            .GetProperty("isVoice")
+            .GetBoolean()
+            .Should()
+            .BeTrue();
     }
 }

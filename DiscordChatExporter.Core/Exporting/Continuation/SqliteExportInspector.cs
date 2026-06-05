@@ -49,36 +49,48 @@ public static class SqliteExportInspector
             }
 
             long count;
+            string? firstIdText;
             string? lastIdText;
             await using (var messages = connection.CreateCommand())
             {
                 messages.CommandText =
                     "SELECT COUNT(*), "
-                    + "(SELECT id FROM messages ORDER BY CAST(id AS INTEGER) DESC LIMIT 1) "
+                    + "(SELECT id FROM messages ORDER BY rowid ASC LIMIT 1), "
+                    + "(SELECT id FROM messages ORDER BY rowid DESC LIMIT 1) "
                     + "FROM messages;";
                 await using var reader = await messages.ExecuteReaderAsync(cancellationToken);
                 await reader.ReadAsync(cancellationToken);
                 count = reader.GetInt64(0);
-                lastIdText = reader.IsDBNull(1) ? null : reader.GetString(1);
+                firstIdText = reader.IsDBNull(1) ? null : reader.GetString(1);
+                lastIdText = reader.IsDBNull(2) ? null : reader.GetString(2);
             }
 
             var channelId = new Snowflake(ulong.Parse(channelIdText, CultureInfo.InvariantCulture));
-            var before = ParseSnowflakeDate(beforeText);
+            var before = ParseOptionalSnowflakeDate(beforeText, "before");
+            var after = ParseOptionalSnowflakeDate(afterText, "after");
 
             Snowflake cutoff;
             bool exact;
+            var isChronological = true;
             if (lastIdText is not null)
             {
                 cutoff = new Snowflake(ulong.Parse(lastIdText, CultureInfo.InvariantCulture));
                 exact = true;
+                if (firstIdText is not null)
+                {
+                    var first = new Snowflake(
+                        ulong.Parse(firstIdText, CultureInfo.InvariantCulture)
+                    );
+                    isChronological = first.Value <= cutoff.Value;
+                }
             }
             else
             {
-                cutoff = ParseSnowflakeDate(afterText) ?? new Snowflake(0);
+                cutoff = after ?? new Snowflake(0);
                 exact = false;
             }
 
-            return new ContinuationCutoff(channelId, cutoff, before, true, count, exact);
+            return new ContinuationCutoff(channelId, cutoff, before, isChronological, count, exact);
         }
         catch (SqliteException ex)
         {
@@ -102,14 +114,25 @@ public static class SqliteExportInspector
         }
     }
 
-    private static Snowflake? ParseSnowflakeDate(string? text) =>
-        !string.IsNullOrEmpty(text)
-        && DateTimeOffset.TryParse(
-            text,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.RoundtripKind,
-            out var date
+    private static Snowflake? ParseOptionalSnowflakeDate(string? text, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        if (
+            DateTimeOffset.TryParse(
+                text,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var date
+            )
         )
-            ? Snowflake.FromDate(date)
-            : null;
+        {
+            return Snowflake.FromDate(date);
+        }
+
+        throw new InvalidExportException(
+            $"The SQLite export has a malformed '{fieldName}' date bound."
+        );
+    }
 }

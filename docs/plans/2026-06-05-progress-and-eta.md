@@ -8,7 +8,7 @@
 
 **Tech Stack:** C# / .NET 10, System.Text.Json, Avalonia, Gress, xUnit + FluentAssertions. `TreatWarningsAsErrors=true`, CSharpier-on-build. Independent of the SQLite-resume and conversion features.
 
-**Test:** `dotnet test DiscordChatExporter.Cli.Tests --filter "FullyQualifiedName~EtaEstimator"` (Phase 1) and `~Progress`/`~CountMessages`/`~Density` (Phase 2).
+**Test:** `dotnet test DiscordChatExporter.Cli.Tests --filter "FullyQualifiedName~EtaEstimatorSpecs"` (Phase 1) and `dotnet test DiscordChatExporter.Cli.Tests --filter "FullyQualifiedName~ExportProgressSpecs|FullyQualifiedName~CountMessagesParsingSpecs|FullyQualifiedName~MessageCountEstimatorSpecs"` (Phase 2 token-free).
 
 ---
 
@@ -322,7 +322,7 @@ public readonly record struct ExportProgress(
 
 ### Task 12: Whole-feature verification + deploy
 
-- [ ] `dotnet build DiscordChatExporter.slnx` → 0/0; `dotnet test DiscordChatExporter.Cli.Tests --filter "FullyQualifiedName~EtaEstimator|FullyQualifiedName~Progress|FullyQualifiedName~Count|FullyQualifiedName~Density"` → green; `dotnet test DiscordChatExporter.Gui.Tests` → no regression.
+- [ ] `dotnet build DiscordChatExporter.slnx` → 0/0; `dotnet test DiscordChatExporter.Cli.Tests --filter "FullyQualifiedName~EtaEstimatorSpecs|FullyQualifiedName~ExportProgressSpecs|FullyQualifiedName~CountMessagesParsingSpecs|FullyQualifiedName~MessageCountEstimatorSpecs"` → green; `dotnet test DiscordChatExporter.Gui.Tests` → no regression.
 - [ ] Trimmed self-contained publish succeeds (only pre-existing Material.Avalonia trim warnings).
 - [ ] **Manual smoke (needs a token):** run a large export — confirm the message counter climbs steadily, the bar no longer races-then-stalls, the ETA stays sane (no "90 h"), a rate-limit pause shows the pause state, and the search-count path actually returns a total (the Phase 2 verification gate). Redeploy over the user-copy, preserving `Settings.dat`.
 

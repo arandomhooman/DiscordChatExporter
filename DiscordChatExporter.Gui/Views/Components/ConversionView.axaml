@@ -53,13 +53,16 @@
 
                 <TextBlock FontWeight="SemiBold" Text="{Binding LocalizationManager.ConversionSourcesHeader}" />
                 <TextBlock IsVisible="{Binding !SourceFilePaths.Count}" Text="{Binding LocalizationManager.ConversionNoSourcesMessage}" />
-                <ListBox MaxHeight="120" ItemsSource="{Binding SourceFilePaths}" />
+                <ListBox
+                    MaxHeight="120"
+                    IsEnabled="{Binding CanEditConversionState}"
+                    ItemsSource="{Binding SourceFilePaths}" />
 
                 <TextBlock FontWeight="SemiBold" Text="{Binding LocalizationManager.ConversionOutputFolderHeader}" />
                 <TextBlock Text="{Binding OutputFolderPath}" TextWrapping="Wrap" />
 
                 <TextBlock FontWeight="SemiBold" Text="{Binding LocalizationManager.ConversionTargetsHeader}" />
-                <WrapPanel>
+                <WrapPanel IsEnabled="{Binding CanEditConversionState}">
                     <CheckBox Content="HTML Dark" IsChecked="{Binding IsHtmlDarkSelected}" />
                     <CheckBox Content="HTML Light" IsChecked="{Binding IsHtmlLightSelected}" />
                     <CheckBox Content="CSV" IsChecked="{Binding IsCsvSelected}" />
