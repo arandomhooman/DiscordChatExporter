@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Markdown;
 using DiscordChatExporter.Core.Markdown.Parsing;
+using DiscordChatExporter.Core.Utils;
 using PowerKit.Extensions;
 
 namespace DiscordChatExporter.Core.Exporting;
@@ -183,7 +184,7 @@ internal partial class HtmlMarkdownVisitor(
         CancellationToken cancellationToken = default
     )
     {
-        var linkUrl = IsSafeLinkUrl(link.Url) ? link.Url : "#";
+        var linkUrl = SanitizeHtmlLinkUrl(link.Url);
 
         // Try to extract the message ID if the link points to a Discord message
         var linkedMessageId = Regex
@@ -353,23 +354,37 @@ internal partial class HtmlMarkdownVisitor
     private static bool IsSafeLinkUrl(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 
-    public static string SanitizeHtmlAssetUrl(string url) =>
-        IsSafeHtmlAssetUrl(url) ? url : "#";
-
-    private static bool IsSafeHtmlAssetUrl(string url)
+    public static string SanitizeHtmlLinkUrl(string url)
     {
         if (string.IsNullOrWhiteSpace(url))
-            return url.Length > 0;
+            return "#";
+
+        var trimmedUrl = url.Trim();
+        return IsSafeLinkUrl(trimmedUrl) ? trimmedUrl : "#";
+    }
+
+    public static string SanitizeHtmlAssetUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return "";
 
         var trimmedUrl = url.Trim();
         if (Path.IsPathFullyQualified(trimmedUrl))
+            return Url.EncodeFilePath(trimmedUrl);
+
+        return IsSafeHtmlAssetUrl(trimmedUrl) ? trimmedUrl : "#";
+    }
+
+    private static bool IsSafeHtmlAssetUrl(string url)
+    {
+        if (Path.IsPathFullyQualified(url))
             return true;
 
-        if (!Uri.TryCreate(trimmedUrl, UriKind.RelativeOrAbsolute, out var uri))
+        if (!Uri.TryCreate(url, UriKind.RelativeOrAbsolute, out var uri))
             return false;
 
         if (!uri.IsAbsoluteUri)
-            return !trimmedUrl.StartsWith("//", StringComparison.Ordinal);
+            return !url.StartsWith("//", StringComparison.Ordinal);
 
         return uri.Scheme is "http" or "https" or "file";
     }

@@ -96,9 +96,10 @@ public static class Http
                     },
                     OnRetry = async args =>
                     {
+                        var response = args.Outcome.Result;
                         try
                         {
-                            if (!IsRateLimitResponse(args.Outcome.Result))
+                            if (!IsRateLimitResponse(response))
                                 return;
 
                             if (
@@ -116,11 +117,12 @@ public static class Http
                                 args.RetryDelay
                             );
 
+                            response?.Dispose();
                             await delayHandler(delay, args.Context.CancellationToken);
                         }
                         finally
                         {
-                            args.Outcome.Result?.Dispose();
+                            response?.Dispose();
                         }
                     },
                 }

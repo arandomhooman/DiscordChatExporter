@@ -23,6 +23,9 @@
             await Context.ResolveAssetUrlAsync(url, CancellationToken)
         );
 
+    string SanitizeLinkUrl(string url) =>
+        HtmlMarkdownVisitor.SanitizeHtmlLinkUrl(url);
+
     string FormatDate(DateTimeOffset instant, string format = "g") =>
         Context.FormatDate(instant, format);
 
@@ -493,7 +496,7 @@
                                                     {
                                                         if (!string.IsNullOrWhiteSpace(embed.Author.Url))
                                                         {
-                                                            <a class="chatlog__embed-author-link" href="@embed.Author.Url">
+                                                            <a class="chatlog__embed-author-link" href="@SanitizeLinkUrl(embed.Author.Url)">
                                                                 <div class="chatlog__embed-author">@embed.Author.Name</div>
                                                             </a>
                                                         }
@@ -511,7 +514,7 @@
                                                 <div class="chatlog__embed-title">
                                                     @if (!string.IsNullOrWhiteSpace(embed.Url))
                                                     {
-                                                        <a class="chatlog__embed-title-link" href="@embed.Url">
+                                                        <a class="chatlog__embed-title-link" href="@SanitizeLinkUrl(embed.Url)">
                                                             <div class="chatlog__markdown chatlog__markdown-preserve"><!--wmm:ignore-->@Html.Raw(await FormatEmbedMarkdownAsync(embed.Title))<!--/wmm:ignore--></div>
                                                         </a>
                                                     }
@@ -524,7 +527,7 @@
 
                                             @* Video thumbnail *@
                                             <div class="chatlog__embed-youtube-container">
-                                                <a href="@youTubeVideoEmbed.Url">
+                                                <a href="@SanitizeLinkUrl(youTubeVideoEmbed.Url)">
                                                     <img class="chatlog__embed-youtube-thumbnail" src="@await ResolveAssetUrlAsync(embed.Thumbnail?.ProxyUrl ?? embed.Thumbnail?.Url ?? youTubeVideoEmbed.ThumbnailUrl)" alt="YouTube video thumbnail" loading="lazy" onerror="this.style.visibility='hidden'" data-canonical-url="@(embed.Thumbnail?.Url ?? youTubeVideoEmbed.ThumbnailUrl)">
                                                 </a>
                                             </div>
@@ -613,7 +616,7 @@
                                                     {
                                                         if (!string.IsNullOrWhiteSpace(embed.Author.Url))
                                                         {
-                                                            <a class="chatlog__embed-author-link" href="@embed.Author.Url">
+                                                            <a class="chatlog__embed-author-link" href="@SanitizeLinkUrl(embed.Author.Url)">
                                                                 <div class="chatlog__embed-author">@embed.Author.Name</div>
                                                             </a>
                                                         }
@@ -631,7 +634,7 @@
                                                 <div class="chatlog__embed-title">
                                                     @if (!string.IsNullOrWhiteSpace(embed.Url))
                                                     {
-                                                        <a class="chatlog__embed-title-link" href="@embed.Url">
+                                                        <a class="chatlog__embed-title-link" href="@SanitizeLinkUrl(embed.Url)">
                                                             <div class="chatlog__markdown chatlog__markdown-preserve"><!--wmm:ignore-->@Html.Raw(await FormatEmbedMarkdownAsync(embed.Title))<!--/wmm:ignore--></div>
                                                         </a>
                                                     }

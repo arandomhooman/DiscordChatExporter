@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Discord.Data.Common;
+using DiscordChatExporter.Core.Discord.Data.Embeds;
 using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Filtering;
 using DiscordChatExporter.Core.Exporting.Partitioning;
@@ -90,6 +91,31 @@ public sealed class HtmlRenderingSafetySpecs : IDisposable
             )
         );
 
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData("https://cdn.example/image.png", "https://cdn.example/image.png")]
+    [InlineData("Attachments/image.png", "Attachments/image.png")]
+    [InlineData("javascript:alert(1)", "#")]
+    [InlineData("data:text/html,<script>alert(1)</script>", "#")]
+    public void Html_asset_url_sanitizer_preserves_safe_urls_and_blocks_unsafe_schemes(
+        string url,
+        string expected
+    )
+    {
+        HtmlMarkdownVisitor.SanitizeHtmlAssetUrl(url).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("https://example.com", "https://example.com")]
+    [InlineData(" http://example.com ", "http://example.com")]
+    [InlineData("Attachments/image.png", "#")]
+    [InlineData("javascript:alert(1)", "#")]
+    public void Html_link_url_sanitizer_only_allows_http_links(string url, string expected)
+    {
+        HtmlMarkdownVisitor.SanitizeHtmlLinkUrl(url).Should().Be(expected);
+    }
+
     [Fact]
     public async Task Html_export_escapes_message_content_when_markdown_formatting_is_disabled()
     {
@@ -103,6 +129,43 @@ public sealed class HtmlRenderingSafetySpecs : IDisposable
 
         html.Should().Contain("&lt;img src=x");
         html.Should().NotContain("""<img src=x onerror="alert(1)">""");
+    }
+
+    [Fact]
+    public async Task Html_export_sanitizes_embed_author_and_title_urls()
+    {
+        var outputPath = Path.Combine(_dir, "chat.html");
+        await using (var exporter = new MessageExporter(CreateContext(outputPath, true)))
+        {
+            await exporter.ExportMessageAsync(
+                CreateMessage("embed") with
+                {
+                    Embeds =
+                    [
+                        new Embed(
+                            "unsafe title",
+                            EmbedKind.Rich,
+                            "javascript:alert(1)",
+                            null,
+                            null,
+                            new EmbedAuthor("unsafe author", "javascript:alert(2)", null, null),
+                            "description",
+                            [],
+                            null,
+                            [],
+                            null,
+                            null
+                        ),
+                    ],
+                }
+            );
+        }
+
+        var html = await File.ReadAllTextAsync(outputPath);
+
+        html.Should().Contain("chatlog__embed-author-link href=#");
+        html.Should().Contain("chatlog__embed-title-link href=#");
+        html.Should().NotContain("javascript:alert");
     }
 
     [Fact]

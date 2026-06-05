@@ -346,7 +346,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             foreach (
                 var emoji in MarkdownParser
                     .ExtractEmojis(embed.Description)
-                    .DistinctBy(e => e.Name, StringComparer.Ordinal)
+                    .DistinctBy(e => (e.Id, e.Name, e.IsAnimated))
             )
             {
                 await WriteEmojiAsync(
@@ -664,7 +664,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
             foreach (
                 var emoji in MarkdownParser
                     .ExtractEmojis(message.ForwardedMessage.Content)
-                    .DistinctBy(e => e.Name, StringComparer.Ordinal)
+                    .DistinctBy(e => (e.Id, e.Name, e.IsAnimated))
             )
             {
                 await WriteEmojiAsync(
@@ -697,7 +697,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         foreach (
             var emoji in MarkdownParser
                 .ExtractEmojis(message.Content)
-                .DistinctBy(e => e.Name, StringComparer.Ordinal)
+                .DistinctBy(e => (e.Id, e.Name, e.IsAnimated))
         )
         {
             await WriteEmojiAsync(
@@ -778,7 +778,7 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         foreach (
             var emoji in MarkdownParser
                 .ExtractEmojis(message.Content)
-                .DistinctBy(e => e.Name, StringComparer.Ordinal)
+                .DistinctBy(e => (e.Id, e.Name, e.IsAnimated))
         )
         {
             await WriteEmojiAsync(

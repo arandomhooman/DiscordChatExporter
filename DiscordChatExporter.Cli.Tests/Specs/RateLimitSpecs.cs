@@ -115,6 +115,63 @@ public class RateLimitSpecs
     }
 
     [Fact]
+    public async Task Disposes_rate_limit_response_before_custom_delay()
+    {
+        var retryResponse = new TrackingHttpResponseMessage(HttpStatusCode.TooManyRequests);
+        retryResponse.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.Zero);
+        var observedDisposedBeforeDelay = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var releaseDelay = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        using var httpClient = new HttpClient(
+            new QueueHttpMessageHandler([
+                new HttpResponseMessage(HttpStatusCode.OK),
+                retryResponse,
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """
+                        {
+                          "id": "123456789012345678",
+                          "username": "test-user",
+                          "global_name": "Test User",
+                          "discriminator": "0",
+                          "avatar": null
+                        }
+                        """,
+                        Encoding.UTF8,
+                        "application/json"
+                    ),
+                },
+            ])
+        );
+
+        var discord = new DiscordClient(
+            "test-token",
+            RateLimitPreference.IgnoreAll,
+            httpClient,
+            async (_, cancellationToken) =>
+            {
+                observedDisposedBeforeDelay.SetResult(retryResponse.IsDisposed);
+                await releaseDelay.Task.WaitAsync(cancellationToken);
+            }
+        );
+
+        var getUserTask = discord.TryGetUserAsync(Snowflake.Parse("123456789012345678")).AsTask();
+
+        var wasDisposedBeforeDelay = await observedDisposedBeforeDelay.Task.WaitAsync(
+            TimeSpan.FromSeconds(5)
+        );
+        releaseDelay.SetResult();
+        var user = await getUserTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        wasDisposedBeforeDelay.Should().BeTrue();
+        user.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task Disposes_retried_response_messages()
     {
         var retryResponse = new TrackingHttpResponseMessage(HttpStatusCode.InternalServerError);

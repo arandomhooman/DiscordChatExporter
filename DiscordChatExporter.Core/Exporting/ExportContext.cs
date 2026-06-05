@@ -203,9 +203,15 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
         {
             var id = ParseSnowflake(member.Id);
             var roleIds = member.RoleIds.Select(ParseSnowflake).ToArray();
-            var avatarUrl =
-                fallbackUsersById.GetValueOrDefault(id)?.AvatarUrl ?? member.AvatarUrl ?? "";
-            var user = new User(id, false, null, member.DisplayName, member.DisplayName, avatarUrl);
+            var fallbackUser = fallbackUsersById.GetValueOrDefault(id);
+            var avatarUrl = fallbackUser?.AvatarUrl ?? member.AvatarUrl ?? "";
+            var user =
+                fallbackUser is not null
+                    ? fallbackUser with
+                    {
+                        AvatarUrl = avatarUrl,
+                    }
+                    : new User(id, false, null, member.DisplayName, member.DisplayName, avatarUrl);
             _membersById[id] = new Member(user, member.DisplayName, avatarUrl, roleIds);
         }
     }

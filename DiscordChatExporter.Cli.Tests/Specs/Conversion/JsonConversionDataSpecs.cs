@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -122,6 +123,36 @@ public sealed class JsonConversionDataSpecs : IDisposable
             typeof(ExportContext)
                 .GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(context)!;
+
+    [Fact]
+    public async Task Json_writer_keeps_inline_emojis_with_same_name_and_different_ids()
+    {
+        var path = Path.Combine(_dir, "same-name-emojis.json");
+        var author = CreateUser(10, "alice");
+
+        await using (var writer = new JsonMessageWriter(File.Create(path), CreateContext(path)))
+        {
+            await writer.WritePreambleAsync();
+            await writer.WriteMessageAsync(
+                CreateMessage(
+                    1001,
+                    author,
+                    "<:same:100000000000000001> <:same:100000000000000002>"
+                )
+            );
+            await writer.WritePostambleAsync();
+        }
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+
+        document
+            .RootElement.GetProperty("messages")[0]
+            .GetProperty("inlineEmojis")
+            .EnumerateArray()
+            .Select(emoji => emoji.GetProperty("id").GetString())
+            .Should()
+            .Equal("100000000000000001", "100000000000000002");
+    }
 
     [Fact]
     public async Task Json_writer_emits_conversion_data_from_context_caches()

@@ -871,7 +871,8 @@ public partial class DashboardViewModel : ViewModelBase
         string filePath,
         Guild guild,
         Channel channel,
-        long messageCount
+        long messageCount,
+        ExportResult? appendedResult
     )
     {
         try
@@ -913,17 +914,26 @@ public partial class DashboardViewModel : ViewModelBase
             // Continue doesn't re-scan the whole file, so carry the first-message metadata forward
             // from the prior entry rather than nulling it; count/size/hash above are freshly read.
             if (prior is not null)
+            {
+                var appendedFile = appendedResult
+                    ?.Files.LastOrDefault(file => file.MessageCount > 0);
+                var hasAppendedMessages = appendedResult?.MessageCount > 0;
                 entries =
                 [
                     entries[0] with
                     {
                         FirstMessageId = prior.FirstMessageId,
                         FirstMessageTimestamp = prior.FirstMessageTimestamp,
-                        LastMessageId = prior.LastMessageId,
-                        LastMessageTimestamp = prior.LastMessageTimestamp,
+                        LastMessageId = hasAppendedMessages
+                            ? appendedFile?.LastMessageId?.ToString()
+                            : prior.LastMessageId,
+                        LastMessageTimestamp = hasAppendedMessages
+                            ? appendedFile?.LastMessageTimestamp
+                            : prior.LastMessageTimestamp,
                         AssetCount = prior.AssetCount,
                     },
                 ];
+            }
 
             await ManifestWriter.WriteAsync(dir, entries, DateTimeOffset.Now);
             RegisterExportedDirs([dir]);
@@ -1258,11 +1268,15 @@ public partial class DashboardViewModel : ViewModelBase
             );
 
             var exporter = new ChannelExporter(_discord);
+            ExportResult? appendedResult = null;
 
             try
             {
                 StartExportProgressRun(await EstimateMessageTotalsAsync([request]));
-                await exporter.ExportChannelAsync(request, CreateExportProgressInput(0, progress));
+                appendedResult = await exporter.ExportChannelAsync(
+                    request,
+                    CreateExportProgressInput(0, progress)
+                );
             }
             catch (ChannelEmptyException)
             {
@@ -1300,7 +1314,7 @@ public partial class DashboardViewModel : ViewModelBase
             // Keep the Library catalog in sync with the file we just grew, and remember its folder.
             // Continue is the third write path and previously updated neither, leaving a stale
             // message count and never surfacing continue-only folders.
-            await RefreshContinuedExportCatalogAsync(filePath, guild, channel, total);
+            await RefreshContinuedExportCatalogAsync(filePath, guild, channel, total, appendedResult);
         }
         catch (DiscordChatExporterException ex) when (!ex.IsFatal)
         {

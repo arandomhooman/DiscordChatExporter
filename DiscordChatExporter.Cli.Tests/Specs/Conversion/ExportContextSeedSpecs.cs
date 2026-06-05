@@ -50,6 +50,42 @@ public sealed class ExportContextSeedSpecs
     }
 
     [Fact]
+    public void SeedFromConversionData_preserves_embedded_user_identity_when_available()
+    {
+        var context = CreateContext();
+        var fallbackUser = new User(
+            new Snowflake(10),
+            true,
+            1234,
+            "alice",
+            "Alice Global",
+            "https://cdn.example/original-avatar.png"
+        );
+        var data = new ConversionData(
+            [
+                new ConversionMember(
+                    "10",
+                    "Alice Server",
+                    "https://cdn.example/member-avatar.png",
+                    null,
+                    []
+                ),
+            ],
+            [],
+            []
+        );
+
+        context.SeedFromConversionData(data, [fallbackUser]);
+
+        var member = context.TryGetMember(new Snowflake(10))!;
+        member.DisplayName.Should().Be("Alice Server");
+        member.User.FullName.Should().Be("alice#1234");
+        member.User.DisplayName.Should().Be("Alice Global");
+        member.User.IsBot.Should().BeTrue();
+        member.AvatarUrl.Should().Be("https://cdn.example/original-avatar.png");
+    }
+
+    [Fact]
     public void SeedFromConversionData_populates_member_role_and_channel_caches()
     {
         var context = CreateContext();
