@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
 using DiscordChatExporter.Gui.Framework;
 using DiscordChatExporter.Gui.Localization;
 using DiscordChatExporter.Gui.Services;
@@ -20,6 +21,19 @@ public partial class MainViewModel(
     public string Title { get; } = $"{Program.Name} v{Program.VersionString}";
 
     public DashboardViewModel Dashboard { get; } = viewModelManager.GetDashboardViewModel();
+
+    // The view currently shown in the main content area: either the Dashboard or the Library.
+    [ObservableProperty]
+    public partial ViewModelBase? CurrentPage { get; set; }
+
+    // Switches the main content to a fresh Library instance so its catalog reloads each time it is
+    // opened. The back affordance returns to the same (held) Dashboard instance.
+    private void ShowLibrary()
+    {
+        var library = viewModelManager.GetLibraryViewModel();
+        library.BackRequested += (_, _) => CurrentPage = Dashboard;
+        CurrentPage = library;
+    }
 
     private async Task ShowUkraineSupportMessageAsync()
     {
@@ -98,6 +112,12 @@ public partial class MainViewModel(
 
     public override async Task InitializeAsync()
     {
+        // Show the Dashboard by default and wire the one-time Dashboard -> Library navigation.
+        // (The Dashboard is created once, so this subscription is set up once.) These run
+        // synchronously before the first await so navigation is live immediately.
+        CurrentPage = Dashboard;
+        Dashboard.LibraryRequested += (_, _) => ShowLibrary();
+
         await ShowUkraineSupportMessageAsync();
         await ShowDevelopmentBuildMessageAsync();
         await CheckForUpdatesAsync();

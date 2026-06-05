@@ -94,6 +94,7 @@ public partial class LocalizationManager
     public string ContinueExportPartitionedUnsupportedMessage => Get();
     public string ContinueExportFormatUnsupportedMessage => Get();
     public string SettingsTooltip => Get();
+    public string LibraryTooltip => Get();
     public string LastMessageSentTooltip => Get();
     public string TokenPlaceholderText => Get();
 

@@ -164,6 +164,12 @@ public partial class DashboardViewModel : ViewModelBase
     private async Task ShowSettingsAsync() =>
         await _dialogManager.ShowDialogAsync(_viewModelManager.GetSettingsViewModel());
 
+    // Raised when the user opens the Library from the Dashboard. MainViewModel handles the switch.
+    public event EventHandler? LibraryRequested;
+
+    [RelayCommand]
+    private void NavigateToLibrary() => LibraryRequested?.Invoke(this, EventArgs.Empty);
+
     private bool CanPullGuilds() => !IsBusy && !string.IsNullOrWhiteSpace(Token);
 
     [RelayCommand(CanExecute = nameof(CanPullGuilds))]

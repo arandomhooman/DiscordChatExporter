@@ -1,0 +1,13 @@
+<UserControl
+    x:Class="DiscordChatExporter.Gui.Views.Components.LibraryView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:components="clr-namespace:DiscordChatExporter.Gui.ViewModels.Components"
+    x:DataType="components:LibraryViewModel">
+    <DockPanel>
+        <TextBlock
+            DockPanel.Dock="Top"
+            Margin="16"
+            Text="Library" />
+    </DockPanel>
+</UserControl>

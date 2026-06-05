@@ -16,7 +16,7 @@
             Background="{DynamicResource MaterialDarkBackgroundBrush}"
             DockPanel.Dock="Top"
             Orientation="Vertical">
-            <Grid Margin="12,12,8,12" ColumnDefinitions="*,Auto">
+            <Grid Margin="12,12,8,12" ColumnDefinitions="*,Auto,Auto">
                 <materialStyles:Card Grid.Column="0">
                     <!--  Token  -->
                     <TextBox
@@ -54,9 +54,25 @@
                     </TextBox>
                 </materialStyles:Card>
 
-                <!--  Settings button  -->
+                <!--  Library button  -->
                 <Button
                     Grid.Column="1"
+                    Margin="8,0,0,0"
+                    Padding="8"
+                    VerticalAlignment="Center"
+                    Command="{Binding NavigateToLibraryCommand}"
+                    Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                    Theme="{DynamicResource MaterialFlatButton}"
+                    ToolTip.Tip="{Binding LocalizationManager.LibraryTooltip}">
+                    <materialIcons:MaterialIcon
+                        Width="24"
+                        Height="24"
+                        Kind="LibraryOutline" />
+                </Button>
+
+                <!--  Settings button  -->
+                <Button
+                    Grid.Column="2"
                     Margin="8,0,0,0"
                     Padding="8"
                     VerticalAlignment="Center"

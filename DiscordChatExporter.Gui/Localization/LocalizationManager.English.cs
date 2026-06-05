@@ -38,6 +38,7 @@ public partial class LocalizationManager
             [nameof(ContinueExportFormatUnsupportedMessage)] =
                 "Continuing this file type is not supported (JSON, HTML, and CSV are).",
             [nameof(SettingsTooltip)] = "Settings",
+            [nameof(LibraryTooltip)] = "Library",
             [nameof(LastMessageSentTooltip)] = "Last message sent:",
             [nameof(TokenPlaceholderText)] = "Token",
             // Token instructions (personal account)
