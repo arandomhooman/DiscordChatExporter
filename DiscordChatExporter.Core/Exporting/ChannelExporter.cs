@@ -67,7 +67,9 @@ public class ChannelExporter(DiscordClient discord)
 
             var currentFraction = Percentage.FromFraction(0);
             var messagesRead = 0L;
-            var percentageProgress = new Progress<Percentage>(fraction => currentFraction = fraction);
+            var percentageProgress = new Progress<Percentage>(fraction =>
+                currentFraction = fraction
+            );
 
             var messages = !request.IsReverseMessageOrder
                 ? discord.GetMessagesAsync(

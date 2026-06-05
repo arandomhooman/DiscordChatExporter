@@ -200,10 +200,10 @@ public class DiscordClient(
             : null;
     }
 
-    private async ValueTask<(HttpStatusCode StatusCode, JsonElement? Json)> TryGetJsonResponseWithStatusAsync(
-        string url,
-        CancellationToken cancellationToken = default
-    )
+    private async ValueTask<(
+        HttpStatusCode StatusCode,
+        JsonElement? Json
+    )> TryGetJsonResponseWithStatusAsync(string url, CancellationToken cancellationToken = default)
     {
         using var response = await GetResponseAsync(url, cancellationToken);
         return response.IsSuccessStatusCode
@@ -224,7 +224,8 @@ public class DiscordClient(
 
         try
         {
-            return response.Value.TryGetProperty("total_results", out var totalResults)
+            return
+                response.Value.TryGetProperty("total_results", out var totalResults)
                 && totalResults.ValueKind == JsonValueKind.Number
                 && totalResults.TryGetInt64(out var count)
                 ? count
@@ -735,11 +736,7 @@ public class DiscordClient(
             .Build();
 
         var response = await GetJsonResponseAsync(url, cancellationToken);
-        return response
-            .EnumerateArray()
-            .Select(Message.Parse)
-            .Reverse()
-            .ToArray();
+        return response.EnumerateArray().Select(Message.Parse).Reverse().ToArray();
     }
 
     private static MessageDensitySample? TryCreateDensitySample(IReadOnlyList<Message> page)
@@ -748,9 +745,7 @@ public class DiscordClient(
             return null;
 
         var span = (page[^1].Timestamp - page[0].Timestamp).Duration().TotalSeconds;
-        return span > 0
-            ? new MessageDensitySample(page[0].Timestamp, page.Count / span)
-            : null;
+        return span > 0 ? new MessageDensitySample(page[0].Timestamp, page.Count / span) : null;
     }
 
     public async ValueTask<long?> EstimateMessageCountByDensityAsync(
@@ -812,7 +807,8 @@ public class DiscordClient(
                         before,
                         cancellationToken
                     )
-                ) is { } lastSample
+                ) is
+                { } lastSample
             )
             {
                 samples.Add(lastSample);

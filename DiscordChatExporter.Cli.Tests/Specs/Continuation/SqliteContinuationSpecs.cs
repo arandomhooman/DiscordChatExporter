@@ -277,13 +277,7 @@ public class SqliteContinuationSpecs : IDisposable
             "chat.db",
             CreateMessage(1001, author, "a"),
             CreateMessage(1002, author, "b"),
-            CreateMessage(
-                1003,
-                author,
-                "c",
-                [CreateAttachment(5003)],
-                [CreateReaction("smile", 2)]
-            )
+            CreateMessage(1003, author, "c", [CreateAttachment(5003)], [CreateReaction("smile", 2)])
         );
         var incoming = await WriteMessageDbAsync(
             "new.db",
@@ -294,13 +288,7 @@ public class SqliteContinuationSpecs : IDisposable
                 [CreateAttachment(6003)],
                 [CreateReaction("smile", 7)]
             ),
-            CreateMessage(
-                1004,
-                author,
-                "d",
-                [CreateAttachment(5004)],
-                [CreateReaction("fire", 1)]
-            )
+            CreateMessage(1004, author, "d", [CreateAttachment(5004)], [CreateReaction("fire", 1)])
         );
         var cutoff = await SqliteExportInspector.InspectAsync(existing);
 

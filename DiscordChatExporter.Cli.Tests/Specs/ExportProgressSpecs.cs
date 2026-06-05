@@ -56,7 +56,15 @@ public class ExportProgressSpecs
         var messagesRead = 0L;
         var exported = 0;
 
-        foreach (var message in new[] { CreateMessage(1), CreateMessage(2), CreateMessage(3), CreateMessage(4) })
+        foreach (
+            var message in new[]
+            {
+                CreateMessage(1),
+                CreateMessage(2),
+                CreateMessage(3),
+                CreateMessage(4),
+            }
+        )
         {
             ChannelExporter.ReportWalkedMessage(
                 message,

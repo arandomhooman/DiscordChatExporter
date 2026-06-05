@@ -57,6 +57,7 @@ public partial class DashboardViewModel : ViewModelBase
     private double _messageRate;
     private DateTimeOffset? _lastRateUpdate;
     private bool _isExportProgressRunActive;
+    private int _activeRateLimitPauseCount;
 
     private DiscordClient? _discord;
 
@@ -229,12 +230,21 @@ public partial class DashboardViewModel : ViewModelBase
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            RateLimitPauseText = state.IsPaused
-                ? string.Format(
+            if (state.IsPaused)
+            {
+                _activeRateLimitPauseCount++;
+                RateLimitPauseText = string.Format(
                     LocalizationManager.RateLimitPauseFormat,
-                    Math.Ceiling(state.Remaining.TotalSeconds).ToString("N0", CultureInfo.CurrentCulture)
-                )
-                : null;
+                    Math.Ceiling(state.Remaining.TotalSeconds)
+                        .ToString("N0", CultureInfo.CurrentCulture)
+                );
+            }
+            else
+            {
+                _activeRateLimitPauseCount = Math.Max(0, _activeRateLimitPauseCount - 1);
+                if (_activeRateLimitPauseCount <= 0)
+                    RateLimitPauseText = null;
+            }
 
             OnPropertyChanged(nameof(IsProgressIndeterminate));
         });
@@ -440,6 +450,7 @@ public partial class DashboardViewModel : ViewModelBase
             _isExportProgressRunActive = false;
         }
 
+        _activeRateLimitPauseCount = 0;
         _etaEstimator.Reset();
         DisplayedProgressFraction = 0;
         EtaText = null;
@@ -497,9 +508,7 @@ public partial class DashboardViewModel : ViewModelBase
         new System.Progress<ExportProgress>(progress =>
         {
             fallbackProgress.Report(progress.Fraction);
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                ApplyExportProgress(index, progress)
-            );
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyExportProgress(index, progress));
         });
 
     private bool HasCompleteCountEstimate()
@@ -507,16 +516,20 @@ public partial class DashboardViewModel : ViewModelBase
         lock (_exportProgressLock)
         {
             return _estimatedMessagesByChannel.Length > 0
-                && _estimatedMessagesByChannel.All(t => t is > 0);
+                && _estimatedMessagesByChannel.All(t => t is not null);
         }
     }
 
-    private (long MessagesRead, long? EstimatedTotal, DateTimeOffset? CurrentTimestamp) SnapshotExportProgress()
+    private (
+        long MessagesRead,
+        long? EstimatedTotal,
+        DateTimeOffset? CurrentTimestamp
+    ) SnapshotExportProgress()
     {
         lock (_exportProgressLock)
         {
             var messagesRead = _messagesReadByChannel.Sum();
-            var estimatedTotal = _estimatedMessagesByChannel.All(t => t is > 0)
+            var estimatedTotal = _estimatedMessagesByChannel.All(t => t is not null)
                 ? _estimatedMessagesByChannel.Sum(t => t!.Value)
                 : (long?)null;
             var currentTimestamp = _currentTimestampByChannel.LastOrDefault(t => t is not null);
@@ -524,11 +537,24 @@ public partial class DashboardViewModel : ViewModelBase
         }
     }
 
+    private void UpdateDisplayedProgressFraction(long messagesRead, long? estimatedTotal)
+    {
+        if (estimatedTotal is null)
+            return;
+
+        var correctedTotal = Math.Max(estimatedTotal.Value, messagesRead);
+        var countFraction = correctedTotal > 0 ? (double)messagesRead / correctedTotal : 0;
+        DisplayedProgressFraction = Math.Max(
+            DisplayedProgressFraction,
+            Math.Clamp(countFraction, 0, 1)
+        );
+    }
+
     private void ApplyExportProgress(int index, ExportProgress progress)
     {
         lock (_exportProgressLock)
         {
-            if (index >= _messagesReadByChannel.Length)
+            if (index < 0 || index >= _messagesReadByChannel.Length)
                 return;
 
             _messagesReadByChannel[index] = Math.Max(
@@ -541,19 +567,10 @@ public partial class DashboardViewModel : ViewModelBase
         var (messagesRead, estimatedTotal, currentTimestamp) = SnapshotExportProgress();
         UpdateRate(messagesRead, DateTimeOffset.Now);
 
-        if (estimatedTotal is > 0)
-        {
-            var correctedTotal = Math.Max(estimatedTotal.Value, messagesRead);
-            var countFraction = correctedTotal > 0 ? (double)messagesRead / correctedTotal : 0;
-            DisplayedProgressFraction = Math.Max(
-                DisplayedProgressFraction,
-                Math.Clamp(countFraction, 0, 1)
-            );
-        }
+        if (estimatedTotal is not null)
+            UpdateDisplayedProgressFraction(messagesRead, estimatedTotal);
         else
-        {
             DisplayedProgressFraction = progress.Fraction.Fraction;
-        }
 
         UpdateProgressStatusText(messagesRead, currentTimestamp);
         UpdateEta();
@@ -561,13 +578,27 @@ public partial class DashboardViewModel : ViewModelBase
 
     private void MarkExportProgressCompleted(int index)
     {
+        var isRunCompleted = false;
+
         lock (_exportProgressLock)
         {
-            if (index < _completedChannels.Length)
+            if (index >= 0 && index < _completedChannels.Length)
+            {
                 _completedChannels[index] = true;
+                _estimatedMessagesByChannel[index] = _messagesReadByChannel[index];
+                isRunCompleted = _completedChannels.All(c => c);
+            }
         }
 
-        UpdateProgressStatusText(SnapshotExportProgress().MessagesRead, null);
+        var (messagesRead, estimatedTotal, _) = SnapshotExportProgress();
+
+        if (isRunCompleted)
+            DisplayedProgressFraction = 1;
+        else
+            UpdateDisplayedProgressFraction(messagesRead, estimatedTotal);
+
+        UpdateProgressStatusText(messagesRead, null);
+        UpdateEta();
     }
 
     private void UpdateRate(long messagesRead, DateTimeOffset now)
@@ -951,13 +982,16 @@ public partial class DashboardViewModel : ViewModelBase
         }
 
         var pairs = toExport
-            .Select((r, index) => new
-            {
-                Index = index,
-                r.Channel,
-                r.Request,
-                Progress = _progressMuxer.CreateInput(),
-            })
+            .Select(
+                (r, index) =>
+                    new
+                    {
+                        Index = index,
+                        r.Channel,
+                        r.Request,
+                        Progress = _progressMuxer.CreateInput(),
+                    }
+            )
             .ToArray();
         StartExportProgressRun(
             await EstimateMessageTotalsAsync(pairs.Select(p => p.Request).ToArray())
