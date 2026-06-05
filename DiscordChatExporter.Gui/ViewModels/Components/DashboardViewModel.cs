@@ -995,7 +995,10 @@ public partial class DashboardViewModel : ViewModelBase
         EtaText =
             estimate is null ? LocalizationManager.EtaEstimatingText
             : estimate.Value <= TimeSpan.Zero ? null
-            : string.Format(LocalizationManager.EtaRemainingFormat, FormatDuration(estimate.Value));
+            : string.Format(
+                LocalizationManager.EtaRemainingFormat,
+                _etaEstimator.IsCapped ? "> 12 h" : FormatDuration(estimate.Value)
+            );
     }
 
     private static string FormatDuration(TimeSpan t) =>
