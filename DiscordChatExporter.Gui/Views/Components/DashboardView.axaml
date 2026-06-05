@@ -16,7 +16,7 @@
             Background="{DynamicResource MaterialDarkBackgroundBrush}"
             DockPanel.Dock="Top"
             Orientation="Vertical">
-            <Grid Margin="12,12,8,12" ColumnDefinitions="*,Auto,Auto">
+            <Grid Margin="12,12,8,12" ColumnDefinitions="*,Auto,Auto,Auto">
                 <materialStyles:Card Grid.Column="0">
                     <!--  Token  -->
                     <TextBox
@@ -70,9 +70,25 @@
                         Kind="LibraryOutline" />
                 </Button>
 
-                <!--  Settings button  -->
+                <!--  Conversion button  -->
                 <Button
                     Grid.Column="2"
+                    Margin="8,0,0,0"
+                    Padding="8"
+                    VerticalAlignment="Center"
+                    Command="{Binding NavigateToConversionCommand}"
+                    Foreground="{DynamicResource MaterialDarkForegroundBrush}"
+                    Theme="{DynamicResource MaterialFlatButton}"
+                    ToolTip.Tip="{Binding LocalizationManager.ConversionTooltip}">
+                    <materialIcons:MaterialIcon
+                        Width="24"
+                        Height="24"
+                        Kind="SwapHorizontal" />
+                </Button>
+
+                <!--  Settings button  -->
+                <Button
+                    Grid.Column="3"
                     Margin="8,0,0,0"
                     Padding="8"
                     VerticalAlignment="Center"

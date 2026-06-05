@@ -48,6 +48,7 @@ public partial class App : Application, IDisposable
         services.AddTransient<MainViewModel>();
         services.AddTransient<DashboardViewModel>();
         services.AddTransient<LibraryViewModel>();
+        services.AddTransient<ConversionViewModel>();
         services.AddTransient<ExportSetupViewModel>();
         services.AddTransient<MessageBoxViewModel>();
         services.AddTransient<SettingsViewModel>();

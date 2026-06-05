@@ -122,5 +122,28 @@ public class DialogManager : IDisposable
         return file.TryGetLocalPath() ?? file.Path.ToString();
     }
 
+    public async Task<IReadOnlyList<string>> PromptMultipleFilePathsAsync(
+        IReadOnlyList<FilePickerFileType>? fileTypes = null,
+        string defaultDirPath = ""
+    )
+    {
+        var topLevel =
+            Application.Current?.ApplicationLifetime?.TryGetTopLevel()
+            ?? throw new ApplicationException("Could not find the top-level visual element.");
+
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(
+            new FilePickerOpenOptions
+            {
+                AllowMultiple = true,
+                FileTypeFilter = fileTypes,
+                SuggestedStartLocation = string.IsNullOrWhiteSpace(defaultDirPath)
+                    ? null
+                    : await topLevel.StorageProvider.TryGetFolderFromPathAsync(defaultDirPath),
+            }
+        );
+
+        return files.Select(f => f.TryGetLocalPath() ?? f.Path.ToString()).ToArray();
+    }
+
     public void Dispose() => _dialogLock.Dispose();
 }

@@ -168,8 +168,13 @@ public partial class DashboardViewModel : ViewModelBase
     // Raised when the user opens the Library from the Dashboard. MainViewModel handles the switch.
     public event EventHandler? LibraryRequested;
 
+    public event EventHandler? ConversionRequested;
+
     [RelayCommand]
     private void NavigateToLibrary() => LibraryRequested?.Invoke(this, EventArgs.Empty);
+
+    [RelayCommand]
+    private void NavigateToConversion() => ConversionRequested?.Invoke(this, EventArgs.Empty);
 
     private bool CanPullGuilds() => !IsBusy && !string.IsNullOrWhiteSpace(Token);
 

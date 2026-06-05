@@ -39,6 +39,7 @@ public partial class LocalizationManager
                 "Continuing this file type is not supported (JSON, HTML, and CSV are).",
             [nameof(SettingsTooltip)] = "Settings",
             [nameof(LibraryTooltip)] = "Library",
+            [nameof(ConversionTooltip)] = "Convert JSON exports",
             [nameof(LastMessageSentTooltip)] = "Last message sent:",
             [nameof(TokenPlaceholderText)] = "Token",
             // Token instructions (personal account)
@@ -80,6 +81,19 @@ public partial class LocalizationManager
             [nameof(LibraryNoExportsMessage)] = "No exports catalogued yet.",
             [nameof(LibrarySearchUnavailableMessage)] = "Search requires a SQLite (.db) export.",
             [nameof(LibraryEmptyResultsMessage)] = "No matching messages.",
+            // Conversion
+            [nameof(ConversionTitle)] = "Conversion",
+            [nameof(ConversionBackButtonText)] = "Back",
+            [nameof(ConversionDescription)] =
+                "Convert JSON exports to HTML, CSV, TXT, or SQLite without connecting to Discord.",
+            [nameof(ConversionPickFilesButtonText)] = "Pick JSON files…",
+            [nameof(ConversionPickOutputFolderButtonText)] = "Pick output folder…",
+            [nameof(ConversionConvertButtonText)] = "CONVERT",
+            [nameof(ConversionSourcesHeader)] = "Source JSON files",
+            [nameof(ConversionNoSourcesMessage)] = "No JSON files selected.",
+            [nameof(ConversionOutputFolderHeader)] = "Output folder",
+            [nameof(ConversionTargetsHeader)] = "Target formats",
+            [nameof(ConversionResultsHeader)] = "Results",
             // Settings
             [nameof(SettingsTitle)] = "Settings",
             [nameof(ThemeLabel)] = "Theme",

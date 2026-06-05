@@ -95,6 +95,7 @@ public partial class LocalizationManager
     public string ContinueExportFormatUnsupportedMessage => Get();
     public string SettingsTooltip => Get();
     public string LibraryTooltip => Get();
+    public string ConversionTooltip => Get();
     public string LastMessageSentTooltip => Get();
     public string TokenPlaceholderText => Get();
 
@@ -117,6 +118,20 @@ public partial class LocalizationManager
     public string LibraryNoExportsMessage => Get();
     public string LibrarySearchUnavailableMessage => Get();
     public string LibraryEmptyResultsMessage => Get();
+
+    // ---- Conversion ----
+
+    public string ConversionTitle => Get();
+    public string ConversionBackButtonText => Get();
+    public string ConversionDescription => Get();
+    public string ConversionPickFilesButtonText => Get();
+    public string ConversionPickOutputFolderButtonText => Get();
+    public string ConversionConvertButtonText => Get();
+    public string ConversionSourcesHeader => Get();
+    public string ConversionNoSourcesMessage => Get();
+    public string ConversionOutputFolderHeader => Get();
+    public string ConversionTargetsHeader => Get();
+    public string ConversionResultsHeader => Get();
 
     // ---- Settings ----
 

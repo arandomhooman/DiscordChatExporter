@@ -17,6 +17,7 @@ public partial class ViewManager
             MainViewModel => new MainView(),
             DashboardViewModel => new DashboardView(),
             LibraryViewModel => new LibraryView(),
+            ConversionViewModel => new ConversionView(),
             ExportSetupViewModel => new ExportSetupView(),
             MessageBoxViewModel => new MessageBoxView(),
             SettingsViewModel => new SettingsView(),

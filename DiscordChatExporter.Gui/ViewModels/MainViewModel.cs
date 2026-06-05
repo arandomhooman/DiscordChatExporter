@@ -41,6 +41,7 @@ public partial class MainViewModel : ViewModelBase
         // deferred to InitializeAsync (which only runs on the view's Loaded event).
         CurrentPage = Dashboard;
         Dashboard.LibraryRequested += (_, _) => ShowLibrary();
+        Dashboard.ConversionRequested += (_, _) => ShowConversion();
     }
 
     public string Title { get; } = $"{Program.Name} v{Program.VersionString}";
@@ -58,6 +59,13 @@ public partial class MainViewModel : ViewModelBase
         var library = viewModelManager.GetLibraryViewModel();
         library.BackRequested += (_, _) => CurrentPage = Dashboard;
         CurrentPage = library;
+    }
+
+    private void ShowConversion()
+    {
+        var conversion = viewModelManager.GetConversionViewModel();
+        conversion.BackRequested += (_, _) => CurrentPage = Dashboard;
+        CurrentPage = conversion;
     }
 
     private async Task ShowUkraineSupportMessageAsync()

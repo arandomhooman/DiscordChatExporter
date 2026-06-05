@@ -19,6 +19,9 @@ public class ViewModelManager(IServiceProvider services, LocalizationManager loc
     public LibraryViewModel GetLibraryViewModel() =>
         services.GetRequiredService<LibraryViewModel>();
 
+    public ConversionViewModel GetConversionViewModel() =>
+        services.GetRequiredService<ConversionViewModel>();
+
     public ExportSetupViewModel GetExportSetupViewModel(
         Guild guild,
         IReadOnlyList<Channel> channels

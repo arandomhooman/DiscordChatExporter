@@ -40,6 +40,7 @@ public sealed class MainViewNavigationTests
         services.AddTransient<MainViewModel>();
         services.AddTransient<DashboardViewModel>();
         services.AddTransient<LibraryViewModel>();
+        services.AddTransient<ConversionViewModel>();
         services.AddTransient<ExportSetupViewModel>();
         services.AddTransient<MessageBoxViewModel>();
         services.AddTransient<SettingsViewModel>();
@@ -96,5 +97,23 @@ public sealed class MainViewNavigationTests
         var secondLibrary = mainViewModel.CurrentPage;
 
         secondLibrary.Should().NotBeSameAs(firstLibrary);
+    }
+
+    [AvaloniaFact]
+    public void CurrentPage_switches_to_Conversion_and_back_to_Dashboard()
+    {
+        using var provider = BuildServices();
+
+        var settings = provider.GetRequiredService<SettingsService>();
+        settings.IsUkraineSupportMessageEnabled = false;
+
+        var mainViewModel = provider.GetRequiredService<MainViewModel>();
+        var dashboard = mainViewModel.Dashboard;
+
+        dashboard.NavigateToConversionCommand.Execute(null);
+        mainViewModel.CurrentPage.Should().BeOfType<ConversionViewModel>();
+
+        ((ConversionViewModel)mainViewModel.CurrentPage!).NavigateBackCommand.Execute(null);
+        mainViewModel.CurrentPage.Should().BeSameAs(dashboard);
     }
 }
