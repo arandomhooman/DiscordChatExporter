@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -8,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
+using DiscordChatExporter.Core.Exporting.Conversion;
 using DiscordChatExporter.Core.Utils;
 using PowerKit.Extensions;
 
@@ -127,6 +129,53 @@ internal class ExportContext(DiscordClient discord, ExportRequest request)
 
     public Color? TryGetUserColor(Snowflake id) =>
         GetUserRoles(id).Where(r => r.Color is not null).Select(r => r.Color).FirstOrDefault();
+
+    public void SeedFromConversionData(ConversionData data)
+    {
+        foreach (var role in data.Roles)
+        {
+            var id = ParseSnowflake(role.Id);
+            _rolesById[id] = new Role(id, role.Name, role.Position, ParseColor(role.ColorHex));
+        }
+
+        foreach (var channel in data.Channels)
+        {
+            var id = ParseSnowflake(channel.Id);
+            _channelsById[id] = new Channel(
+                id,
+                ChannelKind.GuildTextChat,
+                Request.Guild.Id,
+                null,
+                channel.Name,
+                null,
+                null,
+                null,
+                false,
+                null
+            );
+        }
+
+        foreach (var member in data.Members)
+        {
+            var id = ParseSnowflake(member.Id);
+            var roleIds = member.RoleIds.Select(ParseSnowflake).ToArray();
+            var user = new User(
+                id,
+                false,
+                null,
+                member.DisplayName,
+                member.DisplayName,
+                member.AvatarUrl ?? ""
+            );
+            _membersById[id] = new Member(user, member.DisplayName, member.AvatarUrl, roleIds);
+        }
+    }
+
+    private static Snowflake ParseSnowflake(string value) =>
+        new(ulong.Parse(value, CultureInfo.InvariantCulture));
+
+    private static Color? ParseColor(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : ColorTranslator.FromHtml(value);
 
     public async ValueTask<string> ResolveAssetUrlAsync(
         string url,
