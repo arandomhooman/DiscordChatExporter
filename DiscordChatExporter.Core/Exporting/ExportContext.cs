@@ -30,6 +30,12 @@ internal class ExportContext(DiscordClient discord, ExportRequest request)
 
     public int DownloadedAssetCount => _assetDownloader.DownloadedAssetCount;
 
+    internal IEnumerable<KeyValuePair<Snowflake, Member?>> CachedMembers => _membersById;
+
+    internal IEnumerable<KeyValuePair<Snowflake, Channel?>> CachedChannels => _channelsById;
+
+    internal IEnumerable<KeyValuePair<Snowflake, Role>> CachedRoles => _rolesById;
+
     public DateTimeOffset NormalizeDate(DateTimeOffset instant) =>
         Request.IsUtcNormalizationEnabled ? instant.ToUniversalTime() : instant.ToLocalTime();
 

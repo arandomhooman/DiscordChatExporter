@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Discord.Data.Embeds;
+using DiscordChatExporter.Core.Exporting.Conversion;
 using DiscordChatExporter.Core.Markdown.Parsing;
 using JsonExtensions.Writing;
 using PowerKit.Extensions;
@@ -363,6 +364,59 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         _writer.WriteEndObject();
     }
 
+    private async ValueTask WriteConversionDataAsync(CancellationToken cancellationToken = default)
+    {
+        _writer.WriteStartObject("conversionData");
+        _writer.WriteNumber("schemaVersion", ConversionData.CurrentSchemaVersion);
+
+        _writer.WriteStartArray("members");
+        foreach (var (id, member) in Context.CachedMembers.OrderBy(m => m.Key.Value))
+        {
+            if (member is null)
+                continue;
+
+            _writer.WriteStartObject();
+            _writer.WriteString("id", id.ToString());
+            _writer.WriteString("displayName", member.DisplayName ?? member.User.DisplayName);
+            _writer.WriteString("avatarUrl", member.AvatarUrl ?? member.User.AvatarUrl);
+            _writer.WriteString("colorHex", Context.TryGetUserColor(id)?.ToHexString());
+            _writer.WriteStartArray("roleIds");
+            foreach (var roleId in member.RoleIds)
+                _writer.WriteStringValue(roleId.ToString());
+            _writer.WriteEndArray();
+            _writer.WriteEndObject();
+        }
+        _writer.WriteEndArray();
+
+        _writer.WriteStartArray("roles");
+        foreach (var (_, role) in Context.CachedRoles.OrderBy(r => r.Key.Value))
+        {
+            _writer.WriteStartObject();
+            _writer.WriteString("id", role.Id.ToString());
+            _writer.WriteString("name", role.Name);
+            _writer.WriteString("colorHex", role.Color?.ToHexString());
+            _writer.WriteNumber("position", role.Position);
+            _writer.WriteEndObject();
+        }
+        _writer.WriteEndArray();
+
+        _writer.WriteStartArray("channels");
+        foreach (var (id, channel) in Context.CachedChannels.OrderBy(c => c.Key.Value))
+        {
+            if (channel is null)
+                continue;
+
+            _writer.WriteStartObject();
+            _writer.WriteString("id", id.ToString());
+            _writer.WriteString("name", channel.Name);
+            _writer.WriteEndObject();
+        }
+        _writer.WriteEndArray();
+
+        _writer.WriteEndObject();
+        await _writer.FlushAsync(cancellationToken);
+    }
+
     public override async ValueTask WritePreambleAsync(
         CancellationToken cancellationToken = default
     )
@@ -626,6 +680,8 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         _writer.WriteEndArray();
 
         _writer.WriteNumber("messageCount", MessagesWritten);
+
+        await WriteConversionDataAsync(cancellationToken);
 
         // Root object (end)
         _writer.WriteEndObject();
