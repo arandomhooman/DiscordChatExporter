@@ -157,23 +157,23 @@ public sealed class ExportConverterSpecs : IDisposable
             path,
             json.TrimEnd('}', '\r', '\n')
                 + """
-                  ,
-                    "conversionData": {
-                      "schemaVersion": 1,
-                      "members": [
-                        {
-                          "id": "10",
-                          "displayName": "alice",
-                          "avatarUrl": "https://cdn.example/remote-avatar.png",
-                          "colorHex": null,
-                          "roleIds": []
-                        }
-                      ],
-                      "roles": [],
-                      "channels": []
-                    }
+                ,
+                  "conversionData": {
+                    "schemaVersion": 1,
+                    "members": [
+                      {
+                        "id": "10",
+                        "displayName": "alice",
+                        "avatarUrl": "https://cdn.example/remote-avatar.png",
+                        "colorHex": null,
+                        "roleIds": []
+                      }
+                    ],
+                    "roles": [],
+                    "channels": []
                   }
-                  """
+                }
+                """
         );
         return path;
     }
@@ -227,7 +227,9 @@ public sealed class ExportConverterSpecs : IDisposable
         var jsonOut = Path.Combine(_dir, "out.json");
 
         await FluentActions
-            .Awaiting(() => ExportConverter.ConvertAsync(jsonPath, jsonOut, ExportFormat.Json).AsTask())
+            .Awaiting(() =>
+                ExportConverter.ConvertAsync(jsonPath, jsonOut, ExportFormat.Json).AsTask()
+            )
             .Should()
             .ThrowAsync<InvalidExportException>();
     }

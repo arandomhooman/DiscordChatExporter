@@ -96,7 +96,9 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
 
         if (IsOffline)
         {
-            _membersById[id] = fallbackUser is not null ? Member.CreateFallback(fallbackUser) : null;
+            _membersById[id] = fallbackUser is not null
+                ? Member.CreateFallback(fallbackUser)
+                : null;
             return;
         }
 
@@ -144,10 +146,7 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
     public Color? TryGetUserColor(Snowflake id) =>
         GetUserRoles(id).Where(r => r.Color is not null).Select(r => r.Color).FirstOrDefault();
 
-    public void SeedFromConversionData(
-        ConversionData data,
-        IEnumerable<User>? fallbackUsers = null
-    )
+    public void SeedFromConversionData(ConversionData data, IEnumerable<User>? fallbackUsers = null)
     {
         var fallbackUsersById =
             fallbackUsers?.GroupBy(u => u.Id).ToDictionary(g => g.Key, g => g.First()) ?? [];
@@ -179,15 +178,9 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
         {
             var id = ParseSnowflake(member.Id);
             var roleIds = member.RoleIds.Select(ParseSnowflake).ToArray();
-            var avatarUrl = fallbackUsersById.GetValueOrDefault(id)?.AvatarUrl ?? member.AvatarUrl ?? "";
-            var user = new User(
-                id,
-                false,
-                null,
-                member.DisplayName,
-                member.DisplayName,
-                avatarUrl
-            );
+            var avatarUrl =
+                fallbackUsersById.GetValueOrDefault(id)?.AvatarUrl ?? member.AvatarUrl ?? "";
+            var user = new User(id, false, null, member.DisplayName, member.DisplayName, avatarUrl);
             _membersById[id] = new Member(user, member.DisplayName, avatarUrl, roleIds);
         }
     }

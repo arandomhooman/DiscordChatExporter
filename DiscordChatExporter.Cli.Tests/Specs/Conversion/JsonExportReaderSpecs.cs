@@ -274,7 +274,12 @@ public sealed class JsonExportReaderSpecs : IDisposable
 
         var parsed = await JsonExportReader.ParseAsync(path);
 
-        var reaction = parsed.Messages.Should().ContainSingle().Subject.Reactions.Should().ContainSingle().Subject;
+        var reaction = parsed
+            .Messages.Should()
+            .ContainSingle()
+            .Subject.Reactions.Should()
+            .ContainSingle()
+            .Subject;
         reaction.Emoji.Id.Should().BeNull();
         reaction.Emoji.Name.Should().Be("🙂");
         reaction.Emoji.ImageUrl.Should().Be("emoji-local.png");
