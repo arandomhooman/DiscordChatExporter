@@ -108,6 +108,16 @@ public partial class LocalizationManager
     public string TokenBotInstructions => Get();
     public string TokenHelpText => Get();
 
+    // ---- Library ----
+
+    public string LibraryTitle => Get();
+    public string LibraryBackButtonText => Get();
+    public string LibraryScanFolderButtonText => Get();
+    public string LibrarySearchPlaceholder => Get();
+    public string LibraryNoExportsMessage => Get();
+    public string LibrarySearchUnavailableMessage => Get();
+    public string LibraryEmptyResultsMessage => Get();
+
     // ---- Settings ----
 
     public string SettingsTitle => Get();

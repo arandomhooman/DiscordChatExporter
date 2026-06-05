@@ -72,6 +72,14 @@ public partial class LocalizationManager
                 """,
             [nameof(TokenHelpText)] =
                 "If you have questions or issues, please refer to the [documentation](https://github.com/Tyrrrz/DiscordChatExporter/tree/prime/.docs)",
+            // Library
+            [nameof(LibraryTitle)] = "Library",
+            [nameof(LibraryBackButtonText)] = "Back",
+            [nameof(LibraryScanFolderButtonText)] = "Scan folder…",
+            [nameof(LibrarySearchPlaceholder)] = "Search SQLite exports…",
+            [nameof(LibraryNoExportsMessage)] = "No exports catalogued yet.",
+            [nameof(LibrarySearchUnavailableMessage)] = "Search requires a SQLite (.db) export.",
+            [nameof(LibraryEmptyResultsMessage)] = "No matching messages.",
             // Settings
             [nameof(SettingsTitle)] = "Settings",
             [nameof(ThemeLabel)] = "Theme",
