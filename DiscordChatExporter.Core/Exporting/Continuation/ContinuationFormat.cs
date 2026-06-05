@@ -9,7 +9,12 @@ namespace DiscordChatExporter.Core.Exporting.Continuation;
 public static class ContinuationFormat
 {
     public static bool IsSupportedExtension(string filePath) =>
-        Path.GetExtension(filePath).ToLowerInvariant() is ".json" or ".html" or ".htm" or ".csv";
+        Path.GetExtension(filePath).ToLowerInvariant()
+            is ".json"
+                or ".html"
+                or ".htm"
+                or ".csv"
+                or ".db";
 
     public static ExportFormat FormatFor(string filePath) =>
         Path.GetExtension(filePath).ToLowerInvariant() switch
@@ -17,6 +22,7 @@ public static class ContinuationFormat
             ".json" => ExportFormat.Json,
             ".html" or ".htm" => ExportFormat.HtmlDark,
             ".csv" => ExportFormat.Csv,
+            ".db" => ExportFormat.Db,
             var ext => throw new InvalidExportException(
                 $"Continuing {ext} exports is not supported."
             ),
@@ -34,6 +40,7 @@ public static class ContinuationFormat
                 cancellationToken
             ),
             ".csv" => await CsvExportInspector.InspectAsync(filePath, cancellationToken),
+            ".db" => await SqliteExportInspector.InspectAsync(filePath, cancellationToken),
             var ext => throw new InvalidExportException(
                 $"Continuing {ext} exports is not supported."
             ),
@@ -71,6 +78,13 @@ public static class ContinuationFormat
                     cutoff,
                     cancellationToken
                 ),
+            ".db" => await SqliteExportMerger.MergeAsync(
+                existingFilePath,
+                newMessagesFilePath,
+                cutoff,
+                exportedAt,
+                cancellationToken
+            ),
             var ext => throw new InvalidExportException(
                 $"Continuing {ext} exports is not supported."
             ),

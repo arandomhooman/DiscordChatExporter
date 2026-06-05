@@ -218,4 +218,11 @@ public class SqliteContinuationSpecs : IDisposable
         query.CommandText = "SELECT content FROM messages WHERE id = '1003';";
         ((string)query.ExecuteScalar()!).Should().Be("c");
     }
+
+    [Fact]
+    public void ContinuationFormat_supports_sqlite_exports()
+    {
+        ContinuationFormat.IsSupportedExtension("chat.db").Should().BeTrue();
+        ContinuationFormat.FormatFor("chat.db").Should().Be(ExportFormat.Db);
+    }
 }
