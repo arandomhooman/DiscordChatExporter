@@ -326,4 +326,83 @@ public class SqliteMessageWriterSpecs : IDisposable
         reader.GetString(1).Should().Be("blob");
         reader.GetInt64(2).Should().Be(1);
     }
+
+    [Fact]
+    public async Task It_ignores_a_duplicate_message_id_without_aborting_or_double_counting()
+    {
+        // Arrange — the same id written twice (e.g. a pagination-boundary duplicate), each with
+        // its own attachment + reaction.
+        var alice = CreateUser(10, "alice");
+        var attachment = new Attachment(
+            new Snowflake(100),
+            "https://cdn.example/pic.png",
+            "pic.png",
+            null,
+            null,
+            null,
+            FileSize.FromBytes(2048)
+        );
+        var reaction = new Reaction(new Emoji(null, "👍", false), 3);
+        var first = CreateMessage(6001, alice, "the original message", [attachment], [reaction]);
+        var duplicate = CreateMessage(
+            6001,
+            alice,
+            "a duplicate with the same id",
+            [attachment],
+            [reaction]
+        );
+
+        // Act — the duplicate must not throw (would abort the whole channel before the fix).
+        await using (var writer = new SqliteMessageWriter(DbPath, CreateContext(DbPath)))
+        {
+            await writer.WritePreambleAsync();
+            await writer.WriteMessageAsync(first);
+            await writer.WriteMessageAsync(duplicate);
+            await writer.WritePostambleAsync();
+        }
+
+        // Assert — exactly one of everything; the duplicate's dependents are not appended, and the
+        // first write wins on content.
+        using var connection = OpenReadOnly(DbPath);
+        Count(connection, "SELECT COUNT(*) FROM messages;").Should().Be(1);
+        Count(connection, "SELECT COUNT(*) FROM messages_fts;").Should().Be(1);
+        Count(connection, "SELECT COUNT(*) FROM attachments;").Should().Be(1);
+        Count(connection, "SELECT COUNT(*) FROM reactions;").Should().Be(1);
+        // message_count is derived from COUNT(*), so it stays 1 despite two WriteMessageAsync calls.
+        Count(connection, "SELECT message_count FROM export_info;").Should().Be(1);
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT content FROM messages WHERE id = '6001';";
+        ((string)command.ExecuteScalar()!).Should().Be("the original message");
+    }
+
+    [Fact]
+    public async Task It_starts_cleanly_when_a_leftover_sidecar_is_locked()
+    {
+        // Simulate a leftover -shm sidecar locked by another handle (e.g. from a prior crash or an
+        // antivirus/sync scan). In DELETE journal mode SQLite doesn't use -shm, so the export must
+        // proceed even though the pre-export cleanup can't delete the locked file.
+        var lockedSidecar = DbPath + "-shm";
+        File.WriteAllText(lockedSidecar, "stale");
+        using var lockHandle = new FileStream(
+            lockedSidecar,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None
+        );
+
+        // Act
+        await using (var writer = new SqliteMessageWriter(DbPath, CreateContext(DbPath)))
+        {
+            await writer.WritePreambleAsync();
+            await writer.WriteMessageAsync(
+                CreateMessage(7001, CreateUser(10, "alice"), "after a crash")
+            );
+            await writer.WritePostambleAsync();
+        }
+
+        // Assert — the db was created and populated despite the locked sidecar.
+        using var connection = OpenReadOnly(DbPath);
+        Count(connection, "SELECT COUNT(*) FROM messages;").Should().Be(1);
+    }
 }

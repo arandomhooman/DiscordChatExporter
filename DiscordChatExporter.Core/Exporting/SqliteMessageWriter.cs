@@ -179,11 +179,14 @@ internal class SqliteMessageWriter : MessageWriter
 
         await WriteAuthorAsync(message.Author, cancellationToken);
 
+        int messageRows;
         using (var command = _connection!.CreateCommand())
         {
             command.Transaction = _transaction;
+            // OR IGNORE: a repeated message id (e.g. a pagination-boundary duplicate) is skipped
+            // rather than aborting the whole channel, matching how the other writers tolerate it.
             command.CommandText = """
-                INSERT INTO messages
+                INSERT OR IGNORE INTO messages
                     (id, type, timestamp, timestamp_edited, call_ended_timestamp,
                      is_pinned, content, author_id, reference_message_id)
                 VALUES
@@ -203,8 +206,13 @@ internal class SqliteMessageWriter : MessageWriter
             AddParameter(command, "$content", content);
             AddParameter(command, "$authorId", message.Author.Id.ToString());
             AddParameter(command, "$referenceMessageId", message.Reference?.MessageId?.ToString());
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            messageRows = await command.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        // The message id already existed and was ignored above; skip its dependent rows so the
+        // FTS index, attachments, and reactions don't accumulate duplicates for it.
+        if (messageRows == 0)
+            return;
 
         using (var command = _connection!.CreateCommand())
         {
@@ -296,8 +304,10 @@ internal class SqliteMessageWriter : MessageWriter
         using (var command = _connection.CreateCommand())
         {
             command.Transaction = _transaction;
-            command.CommandText = "UPDATE export_info SET message_count = $count;";
-            AddParameter(command, "$count", MessagesWritten);
+            // Derive the count from the table so it always matches the rows actually committed —
+            // robust to OR IGNORE'd duplicates and to a partial transaction on a failed export.
+            command.CommandText =
+                "UPDATE export_info SET message_count = (SELECT COUNT(*) FROM messages);";
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -306,8 +316,11 @@ internal class SqliteMessageWriter : MessageWriter
 
     public override async ValueTask DisposeAsync()
     {
-        // If the postamble never ran (e.g. an exception mid-export), disposing the transaction
-        // rolls it back; disposing the connection releases the file handle (Pooling=False).
+        // Disposing the transaction without a successful Commit rolls it back (e.g. the postamble
+        // threw at/before Commit). Note the exporter still runs the postamble on the mid-export
+        // error path, so a failed export commits whatever was written — consistent with the other
+        // writers, which finalize a partial file on failure. Disposing the connection releases the
+        // file handle (Pooling=False).
         if (_transaction is not null)
             await _transaction.DisposeAsync();
 
@@ -322,8 +335,17 @@ internal class SqliteMessageWriter : MessageWriter
         foreach (var suffix in new[] { "", "-wal", "-shm", "-journal" })
         {
             var path = databaseFilePath + suffix;
-            if (File.Exists(path))
-                File.Delete(path);
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort: a locked or leftover sidecar (e.g. from a prior crash or an
+                // antivirus/sync scan) must not abort the export before it starts. If the main db
+                // file itself is locked, the subsequent OpenAsync surfaces a clear error instead.
+            }
         }
     }
 }
