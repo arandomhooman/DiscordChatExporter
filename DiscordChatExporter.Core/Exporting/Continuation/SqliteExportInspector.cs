@@ -88,8 +88,12 @@ public static class SqliteExportInspector
             );
         }
         catch (Exception ex)
-            when (ex is FormatException or InvalidCastException or InvalidOperationException
-                or OverflowException)
+            when (ex
+                    is FormatException
+                        or InvalidCastException
+                        or InvalidOperationException
+                        or OverflowException
+            )
         {
             throw new InvalidExportException(
                 $"'{filePath}' is not a valid SQLite chat export.",

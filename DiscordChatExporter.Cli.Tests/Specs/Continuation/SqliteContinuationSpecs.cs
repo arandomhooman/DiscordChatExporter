@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
+using DiscordChatExporter.Core.Discord.Data.Common;
 using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Continuation;
 using DiscordChatExporter.Core.Exporting.Filtering;
@@ -72,7 +74,27 @@ public class SqliteContinuationSpecs : IDisposable
     private static User CreateUser(ulong id, string name) =>
         new(new Snowflake(id), false, null, name, name, "");
 
-    private static Message CreateMessage(ulong id, User author, string content) =>
+    private static Attachment CreateAttachment(ulong id) =>
+        new(
+            new Snowflake(id),
+            $"https://example.com/{id}.txt",
+            $"{id}.txt",
+            null,
+            null,
+            null,
+            FileSize.FromBytes(1)
+        );
+
+    private static Reaction CreateReaction(string emojiName, int count) =>
+        new(new Emoji(null, emojiName, false), count);
+
+    private static Message CreateMessage(
+        ulong id,
+        User author,
+        string content,
+        IReadOnlyList<Attachment>? attachments = null,
+        IReadOnlyList<Reaction>? reactions = null
+    ) =>
         new(
             new Snowflake(id),
             MessageKind.Default,
@@ -83,16 +105,27 @@ public class SqliteContinuationSpecs : IDisposable
             null,
             false,
             content,
+            attachments ?? [],
             [],
             [],
-            [],
-            [],
+            reactions ?? [],
             [],
             null,
             null,
             null,
             null
         );
+
+    private async Task<string> WriteMessageDbAsync(string fileName, params Message[] messages)
+    {
+        var path = Path.Combine(_dir, fileName);
+        await using var writer = new SqliteMessageWriter(path, CreateContext(path));
+        await writer.WritePreambleAsync();
+        foreach (var message in messages)
+            await writer.WriteMessageAsync(message);
+        await writer.WritePostambleAsync();
+        return path;
+    }
 
     private async Task<string> WriteDbAsync(
         string fileName,
@@ -167,6 +200,23 @@ public class SqliteContinuationSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Inspector_rejects_a_sqlite_file_missing_export_info()
+    {
+        var path = Path.Combine(_dir, "wrong-schema.db");
+        await using (var connection = new SqliteConnection($"Data Source={path};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE messages (id TEXT PRIMARY KEY);";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var act = async () => await SqliteExportInspector.InspectAsync(path);
+
+        await act.Should().ThrowAsync<InvalidExportException>();
+    }
+
+    [Fact]
     public async Task Merger_appends_new_messages_and_updates_count_and_fts()
     {
         var existing = await WriteDbAsync(
@@ -217,6 +267,75 @@ public class SqliteContinuationSpecs : IDisposable
         using var query = connection.CreateCommand();
         query.CommandText = "SELECT content FROM messages WHERE id = '1003';";
         ((string)query.ExecuteScalar()!).Should().Be("c");
+    }
+
+    [Fact]
+    public async Task Merger_ignores_boundary_duplicate_attachments_and_reactions()
+    {
+        var author = CreateUser(10, "alice");
+        var existing = await WriteMessageDbAsync(
+            "chat.db",
+            CreateMessage(1001, author, "a"),
+            CreateMessage(1002, author, "b"),
+            CreateMessage(
+                1003,
+                author,
+                "c",
+                [CreateAttachment(5003)],
+                [CreateReaction("smile", 2)]
+            )
+        );
+        var incoming = await WriteMessageDbAsync(
+            "new.db",
+            CreateMessage(
+                1003,
+                author,
+                "c again",
+                [CreateAttachment(6003)],
+                [CreateReaction("smile", 7)]
+            ),
+            CreateMessage(
+                1004,
+                author,
+                "d",
+                [CreateAttachment(5004)],
+                [CreateReaction("fire", 1)]
+            )
+        );
+        var cutoff = await SqliteExportInspector.InspectAsync(existing);
+
+        var total = await SqliteExportMerger.MergeAsync(
+            existing,
+            incoming,
+            cutoff,
+            DateTimeOffset.UnixEpoch
+        );
+
+        total.Should().Be(4);
+        using var connection = OpenReadOnly(existing);
+        Count(connection, "SELECT COUNT(*) FROM attachments;").Should().Be(2);
+        Count(connection, "SELECT COUNT(*) FROM reactions;").Should().Be(2);
+        Count(connection, "SELECT COUNT(*) FROM attachments WHERE message_id = '1003';")
+            .Should()
+            .Be(1);
+        Count(connection, "SELECT COUNT(*) FROM reactions WHERE message_id = '1003';")
+            .Should()
+            .Be(1);
+    }
+
+    [Fact]
+    public async Task Inspector_reads_the_newest_cutoff_after_a_merge()
+    {
+        var existing = await WriteDbAsync("chat.db", (1001, "a"), (1002, "b"), (1003, "c"));
+        var incoming = await WriteDbAsync("new.db", (1004, "d"), (1005, "e"));
+        var cutoff = await SqliteExportInspector.InspectAsync(existing);
+
+        await SqliteExportMerger.MergeAsync(existing, incoming, cutoff, DateTimeOffset.UnixEpoch);
+
+        var mergedCutoff = await SqliteExportInspector.InspectAsync(existing);
+        mergedCutoff.Cutoff.Should().Be(new Snowflake(1005));
+        mergedCutoff.ExistingCount.Should().Be(5);
+        mergedCutoff.CutoffIsExact.Should().BeTrue();
     }
 
     [Fact]
