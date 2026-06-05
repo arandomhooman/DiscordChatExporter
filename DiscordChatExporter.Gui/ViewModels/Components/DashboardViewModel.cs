@@ -346,6 +346,9 @@ public partial class DashboardViewModel : ViewModelBase
         await clipboard.SetTextAsync(text);
     }
 
+    private static IProgress<ExportProgress> ToExportProgress(IProgress<Percentage> progress) =>
+        new System.Progress<ExportProgress>(p => progress.Report(p.Fraction));
+
     private async ValueTask CopyUserMessagesAsync(
         ExportSetupViewModel dialog,
         ChannelExporter exporter
@@ -375,7 +378,7 @@ public partial class DashboardViewModel : ViewModelBase
                 _settingsService.IsUtcNormalizationEnabled
             );
 
-            await exporter.ExportChannelAsync(request, progress);
+            await exporter.ExportChannelAsync(request, ToExportProgress(progress));
 
             var text = await File.ReadAllTextAsync(outputPath);
             var user = dialog.CopyUserMessagesUserValue?.Trim();
@@ -695,7 +698,7 @@ public partial class DashboardViewModel : ViewModelBase
                 {
                     var result = await exporter.ExportChannelAsync(
                         request,
-                        progress,
+                        ToExportProgress(progress),
                         cancellationToken
                     );
 
@@ -915,7 +918,7 @@ public partial class DashboardViewModel : ViewModelBase
 
             try
             {
-                await exporter.ExportChannelAsync(request, progress);
+                await exporter.ExportChannelAsync(request, ToExportProgress(progress));
             }
             catch (ChannelEmptyException)
             {

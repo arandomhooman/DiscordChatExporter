@@ -280,9 +280,12 @@ public abstract class ExportCommandBase : DiscordCommandBase
                                         IsUtcNormalizationEnabled
                                     );
 
+                                    var percentageProgress = progress.ToPercentageBased();
                                     await Exporter.ExportChannelAsync(
                                         request,
-                                        progress.ToPercentageBased(),
+                                        new System.Progress<ExportProgress>(p =>
+                                            percentageProgress.Report(p.Fraction)
+                                        ),
                                         innerCancellationToken
                                     );
                                 }

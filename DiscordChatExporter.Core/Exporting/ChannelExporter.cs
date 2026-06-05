@@ -12,7 +12,7 @@ public class ChannelExporter(DiscordClient discord)
 {
     public async ValueTask<ExportResult> ExportChannelAsync(
         ExportRequest request,
-        IProgress<Percentage>? progress = null,
+        IProgress<ExportProgress>? progress = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -65,24 +65,30 @@ public class ChannelExporter(DiscordClient discord)
                 );
             }
 
+            var currentFraction = Percentage.FromFraction(0);
+            var messagesRead = 0L;
+            var percentageProgress = new Progress<Percentage>(fraction => currentFraction = fraction);
+
             var messages = !request.IsReverseMessageOrder
                 ? discord.GetMessagesAsync(
                     request.Channel.Id,
                     request.After,
                     request.Before,
-                    progress,
+                    percentageProgress,
                     cancellationToken
                 )
                 : discord.GetMessagesInReverseAsync(
                     request.Channel.Id,
                     request.After,
                     request.Before,
-                    progress,
+                    percentageProgress,
                     cancellationToken
                 );
 
             await foreach (var message in messages)
             {
+                ReportWalkedMessage(message, currentFraction, progress, ref messagesRead);
+
                 try
                 {
                     // Resolve members for referenced users
@@ -116,5 +122,16 @@ public class ChannelExporter(DiscordClient discord)
             messageExporter.MessagesExported,
             context.DownloadedAssetCount
         );
+    }
+
+    internal static void ReportWalkedMessage(
+        Message message,
+        Percentage fraction,
+        IProgress<ExportProgress>? progress,
+        ref long messagesRead
+    )
+    {
+        messagesRead++;
+        progress?.Report(new ExportProgress(fraction, messagesRead, message.Timestamp));
     }
 }
