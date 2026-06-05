@@ -34,7 +34,7 @@ public sealed class ConversionViewModelTests : IDisposable
         }
     }
 
-    private string WriteJson(string fileName, string content)
+    private string WriteJson(string fileName, string content, string inlineEmojis = "[]")
     {
         var path = Path.Combine(_dir, fileName);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -84,7 +84,7 @@ public sealed class ConversionViewModelTests : IDisposable
                   "stickers": [],
                   "reactions": [],
                   "mentions": [],
-                  "inlineEmojis": []
+                  "inlineEmojis": {{inlineEmojis}}
                 }
               ],
               "messageCount": 1
@@ -197,6 +197,60 @@ public sealed class ConversionViewModelTests : IDisposable
             .Should()
             .ContainSingle();
         File.Exists(Path.Combine(_dir, "chat.csv")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Convert_reports_conflict_when_output_file_already_exists()
+    {
+        var json = WriteJson("chat.json", "from json");
+        var existingOutput = Path.Combine(_dir, "chat.csv");
+        await File.WriteAllTextAsync(
+            existingOutput,
+            "do not replace",
+            TestContext.Current.CancellationToken
+        );
+        var viewModel = CreateViewModel();
+        viewModel.IsCsvSelected = true;
+        viewModel.SourceFilePaths.Add(json);
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        viewModel.Results.Should().ContainSingle();
+        viewModel.Results[0].IsSuccess.Should().BeFalse();
+        viewModel.Results[0].Message.Should().ContainEquivalentOf("conflict");
+        (
+            await File.ReadAllTextAsync(existingOutput, TestContext.Current.CancellationToken)
+        ).Should()
+            .Be("do not replace");
+    }
+
+    [Fact]
+    public async Task Convert_does_not_label_legacy_inline_emoji_metadata_as_conversion_data()
+    {
+        var json = WriteJson(
+            "legacy.json",
+            "hello <:wave:123>",
+            """
+            [
+              {
+                "id": "123",
+                "name": "wave",
+                "code": "<:wave:123>",
+                "isAnimated": false,
+                "imageUrl": "https://cdn.discordapp.com/emojis/123.png"
+              }
+            ]
+            """
+        );
+        var viewModel = CreateViewModel();
+        viewModel.IsTxtSelected = true;
+        viewModel.SourceFilePaths.Add(json);
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        viewModel.Results.Should().ContainSingle();
+        viewModel.Results[0].IsSuccess.Should().BeTrue();
+        viewModel.Results[0].HasConversionData.Should().BeFalse();
     }
 
     [Fact]

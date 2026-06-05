@@ -10,11 +10,11 @@ namespace DiscordChatExporter.Cli.Tests.Specs.Continuation;
 
 public class HtmlExportInspectorSpecs
 {
-    private static async Task<string> WriteAsync(string html)
+    private static async Task<string> WriteAsync(string html, string name = "Guild - general")
     {
         var path = Path.Combine(
             Path.GetTempPath(),
-            $"Guild - general [222] - {Guid.NewGuid():N}.html"
+            $"{name} [222] - {Guid.NewGuid():N}.html"
         );
         await File.WriteAllTextAsync(path, html);
         return path;
@@ -43,6 +43,39 @@ public class HtmlExportInspectorSpecs
     public async Task I_cannot_continue_an_html_export_with_no_messages()
     {
         var path = await WriteAsync(HtmlSample.Export());
+        try
+        {
+            var act = async () => await HtmlExportInspector.InspectAsync(path);
+            await act.Should().ThrowAsync<InvalidExportException>();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_cannot_continue_an_html_export_with_mixed_message_order()
+    {
+        var path = await WriteAsync(HtmlSample.Export([1000L, 3000L], [2000L]));
+        try
+        {
+            var act = async () => await HtmlExportInspector.InspectAsync(path);
+            await act.Should().ThrowAsync<InvalidExportException>();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_cannot_continue_a_before_bounded_html_export_without_exact_bound_metadata()
+    {
+        var path = await WriteAsync(
+            HtmlSample.Export([1000L, 2000L]),
+            "Guild - general (before 2026-01-01)"
+        );
         try
         {
             var act = async () => await HtmlExportInspector.InspectAsync(path);

@@ -13,6 +13,7 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
 {
     private int _partitionIndex;
     private MessageWriter? _writer;
+    private bool _hasWriterInitializationFailed;
 
     private readonly List<MutableFileStats> _files = [];
     private MutableFileStats? _currentFile;
@@ -47,7 +48,16 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
         var filePath = GetPartitionFilePath(context.Request.OutputFilePath, _partitionIndex);
 
         var writer = CreateMessageWriter(filePath, context.Request.Format, context);
-        await writer.WritePreambleAsync(cancellationToken);
+        try
+        {
+            await writer.WritePreambleAsync(cancellationToken);
+        }
+        catch
+        {
+            _hasWriterInitializationFailed = true;
+            await writer.DisposeAsync();
+            throw;
+        }
 
         _currentFile = new MutableFileStats(filePath);
         _files.Add(_currentFile);
@@ -86,7 +96,7 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         // If not messages were written, force the creation of an empty file
-        if (MessagesExported <= 0)
+        if (MessagesExported <= 0 && !_hasWriterInitializationFailed)
             _ = await InitializeWriterAsync();
 
         await UninitializeWriterAsync();

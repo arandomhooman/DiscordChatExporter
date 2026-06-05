@@ -146,7 +146,7 @@ public sealed partial class ConversionViewModel(
             );
             var conflictingOutputPaths = conversionJobs
                 .GroupBy(j => j.OutputFilePath, StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1)
+                .Where(g => g.Count() > 1 || File.Exists(g.Key))
                 .Select(g => g.Key)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -180,8 +180,8 @@ public sealed partial class ConversionViewModel(
                 bool hasConversionData;
                 try
                 {
-                    hasConversionData =
-                        (await JsonExportReader.ParseAsync(sourcePath)).ConversionData is not null;
+                    hasConversionData = (await JsonExportReader.ParseAsync(sourcePath))
+                        .HasConversionDataBlock;
                 }
                 catch (Exception ex)
                 {

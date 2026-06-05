@@ -133,7 +133,18 @@ public class DiscordClient(
                                 // is not actually enforced by the server. So we cap it at a reasonable value.
                                 .Clamp(TimeSpan.Zero, TimeSpan.FromSeconds(60));
 
-                            await WaitForRateLimitAsync(delay, innerContext.CancellationToken);
+                            try
+                            {
+                                await response.Content.LoadIntoBufferAsync(
+                                    innerContext.CancellationToken
+                                );
+                                await WaitForRateLimitAsync(delay, innerContext.CancellationToken);
+                            }
+                            catch
+                            {
+                                response.Dispose();
+                                throw;
+                            }
                         }
                     }
 
@@ -694,10 +705,7 @@ public class DiscordClient(
                 {
                     foreach (var archiveType in new[] { "public", "private" })
                     {
-                        // This endpoint parameter expects an ISO8601 timestamp, not a snowflake
-                        var currentBefore = before
-                            ?.ToDate()
-                            .ToString("O", CultureInfo.InvariantCulture);
+                        string? currentBefore = null;
 
                         while (true)
                         {
@@ -891,7 +899,11 @@ public class DiscordClient(
         // This also snapshots the boundaries, which means that messages posted after
         // the export started will not appear in the output.
         var lastMessage = await TryGetLastMessageAsync(channelId, before, cancellationToken);
-        if (lastMessage is null || lastMessage.Timestamp < after?.ToDate())
+        if (
+            lastMessage is null
+            || after is not null
+                && lastMessage.Id.Value <= after.Value.Value
+        )
             yield break;
 
         // Keep track of the first message in range in order to calculate the progress
@@ -929,8 +941,9 @@ public class DiscordClient(
             {
                 firstMessage ??= message;
 
-                // Ensure that the messages are in range
-                if (message.Timestamp > lastMessage.Timestamp)
+                // Ensure that the messages are in range. Use snowflake IDs instead of
+                // timestamps so same-millisecond boundary messages are still excluded.
+                if (before is not null && message.Id.Value >= before.Value.Value)
                     yield break;
 
                 // Report progress based on timestamps
@@ -968,7 +981,11 @@ public class DiscordClient(
         // progress based on the difference between message timestamps.
         // Snapshotting is not necessary here because new messages can't appear in the past.
         var firstMessage = await TryGetFirstMessageAsync(channelId, after, cancellationToken);
-        if (firstMessage is null || firstMessage.Timestamp > before?.ToDate())
+        if (
+            firstMessage is null
+            || before is not null
+                && firstMessage.Id.Value >= before.Value.Value
+        )
             yield break;
 
         // Keep track of the last message in range in order to calculate the progress
@@ -999,6 +1016,11 @@ public class DiscordClient(
 
             foreach (var message in messages)
             {
+                // Reverse exports walk newest to oldest, so once we hit the lower
+                // exclusive bound, every later item in the page is also out of range.
+                if (after is not null && message.Id.Value <= after.Value.Value)
+                    yield break;
+
                 lastMessage ??= message;
 
                 // Report progress based on timestamps

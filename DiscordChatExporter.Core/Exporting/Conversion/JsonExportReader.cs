@@ -20,6 +20,7 @@ public sealed record ParsedExport(
     Channel Channel,
     IReadOnlyList<Message> Messages,
     ConversionData? ConversionData,
+    bool HasConversionDataBlock,
     Snowflake? After,
     Snowflake? Before
 );
@@ -69,12 +70,22 @@ public static class JsonExportReader
                 .SelectMany(ParseInlineEmojis)
                 .DistinctBy(emoji => (emoji.Id, emoji.Name, emoji.IsAnimated))
                 .ToArray();
-            var conversionData = root.TryGetProperty("conversionData", out var conversionDataJson)
-                ? ParseConversionData(conversionDataJson)
-                : null;
+            var hasConversionDataBlock = root.TryGetProperty(
+                "conversionData",
+                out var conversionDataJson
+            );
+            var conversionData = hasConversionDataBlock ? ParseConversionData(conversionDataJson) : null;
             conversionData = MergeConversionData(conversionData, inlineEmojis);
 
-            return new ParsedExport(guild, channel, messages, conversionData, after, before);
+            return new ParsedExport(
+                guild,
+                channel,
+                messages,
+                conversionData,
+                hasConversionDataBlock,
+                after,
+                before
+            );
         }
         catch (InvalidExportException)
         {

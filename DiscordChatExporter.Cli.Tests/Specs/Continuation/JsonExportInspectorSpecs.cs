@@ -70,6 +70,21 @@ public class JsonExportInspectorSpecs
         }
         """;
 
+    private const string MixedOrdered = """
+        {
+          "guild": { "id": "111", "name": "G" },
+          "channel": { "id": "222", "name": "C" },
+          "dateRange": { "after": null, "before": null },
+          "exportedAt": "2021-01-01T00:00:00+00:00",
+          "messages": [
+            { "id": "1000", "type": "Default", "timestamp": "2021-07-19T13:34:18+00:00", "content": "a" },
+            { "id": "3000", "type": "Default", "timestamp": "2021-07-24T13:49:13+00:00", "content": "b" },
+            { "id": "2000", "type": "Default", "timestamp": "2021-07-20T13:49:13+00:00", "content": "c" }
+          ],
+          "messageCount": 3
+        }
+        """;
+
     // Messages with no "timestamp" field at all.
     private const string NoTimestamps = """
         {
@@ -116,6 +131,21 @@ public class JsonExportInspectorSpecs
             info.IsChronological.Should().BeFalse();
             // The cutoff is still the last element in the array, regardless of order.
             info.LastMessageId.Value.Should().Be(1000UL);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_cannot_continue_a_mixed_order_export()
+    {
+        var path = await WriteTempAsync(MixedOrdered);
+        try
+        {
+            var act = async () => await JsonExportInspector.InspectAsync(path);
+            await act.Should().ThrowAsync<InvalidJsonExportException>();
         }
         finally
         {

@@ -96,4 +96,43 @@ public class CsvExportInspectorSpecs
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task I_cannot_continue_a_csv_export_with_mixed_message_order()
+    {
+        var body =
+            "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"first\",\"\",\"\"\r\n"
+            + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"second\",\"\",\"\"\r\n"
+            + "\"5\",\"A\",\"2021-07-20T13:49:13.0000000+00:00\",\"third\",\"\",\"\"\r\n";
+        var path = await WriteAsync(Header + body, "Guild - general");
+        try
+        {
+            var act = async () => await CsvExportInspector.InspectAsync(path);
+            await act.Should().ThrowAsync<InvalidExportException>();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task I_cannot_continue_a_before_bounded_csv_export_without_exact_bound_metadata()
+    {
+        var body =
+            "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"first\",\"\",\"\"\r\n";
+        var path = await WriteAsync(
+            Header + body,
+            "Guild - general (2021-07-01 to 2021-07-31)"
+        );
+        try
+        {
+            var act = async () => await CsvExportInspector.InspectAsync(path);
+            await act.Should().ThrowAsync<InvalidExportException>();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

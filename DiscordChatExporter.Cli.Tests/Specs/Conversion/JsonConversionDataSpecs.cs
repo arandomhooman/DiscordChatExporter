@@ -134,11 +134,7 @@ public sealed class JsonConversionDataSpecs : IDisposable
         {
             await writer.WritePreambleAsync();
             await writer.WriteMessageAsync(
-                CreateMessage(
-                    1001,
-                    author,
-                    "<:same:100000000000000001> <:same:100000000000000002>"
-                )
+                CreateMessage(1001, author, "<:same:100000000000000001> <:same:100000000000000002>")
             );
             await writer.WritePostambleAsync();
         }

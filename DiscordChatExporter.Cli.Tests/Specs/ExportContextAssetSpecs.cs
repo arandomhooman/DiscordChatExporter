@@ -33,8 +33,7 @@ public sealed class ExportContextAssetSpecs : IDisposable
         }
     }
 
-    [Fact]
-    public async Task Resolve_asset_url_preserves_user_cancellation()
+    private ExportContext CreateHtmlContext(bool shouldDownloadAssets)
     {
         var guild = new Guild(new Snowflake(1), "Test Guild", "");
         var channel = new Channel(
@@ -62,12 +61,18 @@ public sealed class ExportContextAssetSpecs : IDisposable
             MessageFilter.Null,
             isReverseMessageOrder: false,
             shouldFormatMarkdown: true,
-            shouldDownloadAssets: true,
+            shouldDownloadAssets,
             shouldReuseAssets: false,
             locale: "en-US",
             isUtcNormalizationEnabled: true
         );
-        var context = new ExportContext(new DiscordClient("fake-token"), request);
+        return new ExportContext(new DiscordClient("fake-token"), request);
+    }
+
+    [Fact]
+    public async Task Resolve_asset_url_preserves_user_cancellation()
+    {
+        var context = CreateHtmlContext(shouldDownloadAssets: true);
         using var cancellationTokenSource = new CancellationTokenSource();
         await cancellationTokenSource.CancelAsync();
 
@@ -78,5 +83,15 @@ public sealed class ExportContextAssetSpecs : IDisposable
             );
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task Resolve_asset_url_does_not_download_non_http_urls()
+    {
+        var context = CreateHtmlContext(shouldDownloadAssets: true);
+
+        var result = await context.ResolveAssetUrlAsync("javascript:alert(1)");
+
+        result.Should().Be("javascript:alert(1)");
     }
 }

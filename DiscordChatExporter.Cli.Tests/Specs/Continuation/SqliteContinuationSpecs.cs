@@ -264,6 +264,31 @@ public class SqliteContinuationSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Inspector_rejects_a_partial_sqlite_export_schema()
+    {
+        var path = Path.Combine(_dir, "partial-schema.db");
+        await using (var connection = new SqliteConnection($"Data Source={path};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE export_info (
+                    channel_id TEXT NOT NULL,
+                    after TEXT,
+                    before TEXT
+                );
+                CREATE TABLE messages (id TEXT PRIMARY KEY);
+                INSERT INTO export_info (channel_id, after, before) VALUES ('2', NULL, NULL);
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var act = async () => await SqliteExportInspector.InspectAsync(path);
+
+        await act.Should().ThrowAsync<InvalidExportException>();
+    }
+
+    [Fact]
     public async Task Merger_appends_new_messages_and_updates_count_and_fts()
     {
         var existing = await WriteDbAsync(

@@ -23,6 +23,14 @@ public static class CsvExportInspector
                     + "Keep the default file name (it includes the channel id) or re-export."
             );
 
+        if (ContinuationFileName.HasBeforeBoundHint(filePath))
+        {
+            throw new InvalidExportException(
+                "CSV exports with a 'before' date range cannot be continued safely. "
+                    + "Continue the original JSON or SQLite export instead."
+            );
+        }
+
         string text;
         try
         {
@@ -41,6 +49,7 @@ public static class CsvExportInspector
 
         DateTimeOffset? firstDate = null;
         DateTimeOffset? lastDate = null;
+        var orderDirection = 0;
         long count = 0;
         for (var i = 1; i < rows.Count; i++)
         {
@@ -56,6 +65,7 @@ public static class CsvExportInspector
                 )
             )
             {
+                TrackDateOrder(lastDate, date, ref orderDirection);
                 firstDate ??= date;
                 lastDate = date;
             }
@@ -137,5 +147,33 @@ public static class CsvExportInspector
             rows.Add(row);
         }
         return rows;
+    }
+
+    private static void TrackDateOrder(
+        DateTimeOffset? previousDate,
+        DateTimeOffset currentDate,
+        ref int orderDirection
+    )
+    {
+        if (previousDate is null)
+            return;
+
+        var comparison = currentDate.CompareTo(previousDate.Value);
+        if (comparison == 0)
+            return;
+
+        var direction = Math.Sign(comparison);
+        if (orderDirection == 0)
+        {
+            orderDirection = direction;
+            return;
+        }
+
+        if (orderDirection != direction)
+        {
+            throw new InvalidExportException(
+                "The CSV export's messages are not consistently ordered."
+            );
+        }
     }
 }

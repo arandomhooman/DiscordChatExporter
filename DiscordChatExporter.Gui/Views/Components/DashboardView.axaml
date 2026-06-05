@@ -108,6 +108,7 @@
                 Height="2"
                 Background="Transparent"
                 IsIndeterminate="{Binding IsProgressIndeterminate}"
+                Maximum="1"
                 Value="{Binding DisplayedProgressFraction, Mode=OneWay}" />
             <StackPanel
                 Margin="12,0,12,4"

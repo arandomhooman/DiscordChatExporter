@@ -119,6 +119,22 @@ public sealed class DashboardProgressTests
     }
 
     [AvaloniaFact]
+    public void Overestimated_count_is_corrected_by_modeled_progress_fraction()
+    {
+        var viewModel = CreateViewModel();
+
+        Invoke(viewModel, "StartExportProgressRun", new long?[] { 100 });
+        Invoke(
+            viewModel,
+            "ApplyExportProgress",
+            0,
+            new ExportProgress(Percentage.FromFraction(0.5), 10, DateTimeOffset.UnixEpoch)
+        );
+
+        viewModel.DisplayedProgressFraction.Should().BeApproximately(0.5, 0.0001);
+    }
+
+    [AvaloniaFact]
     public void Mixed_missing_estimate_leaves_fallback_fraction_owned_by_muxer()
     {
         var viewModel = CreateViewModel();

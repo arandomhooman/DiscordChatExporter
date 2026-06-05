@@ -51,9 +51,6 @@ jobs:
         run: echo "::error title=Bad formatting::Formatting issues detected. Please build the solution locally to fix them."
 
   test:
-    # Tests need access to secrets, so we can't run them against PRs because of limited trust
-    if: ${{ github.event_name != 'pull_request' }}
-
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -67,11 +64,27 @@ jobs:
       - name: Install .NET
         uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
 
-      - name: Run tests
+      - name: Run token-free CLI tests
+        run: >
+          dotnet test DiscordChatExporter.Cli.Tests
+          -p:CSharpier_Bypass=true
+          --configuration Release
+          --filter "FullyQualifiedName~Conversion|FullyQualifiedName~Continuation|FullyQualifiedName~Manifest|FullyQualifiedName~EtaEstimatorSpecs|FullyQualifiedName~ExportProgressSpecs|FullyQualifiedName~ExportFormatSpecs|FullyQualifiedName~ExportSummarizerSpecs|FullyQualifiedName~ExportCatalogBuilderSpecs|FullyQualifiedName~ExportContextAssetSpecs|FullyQualifiedName~DiscordDataParsingSpecs|FullyQualifiedName~DiscordClientMessageRangeSpecs|FullyQualifiedName~RateLimitSpecs|FullyQualifiedName~CountMessagesParsingSpecs|FullyQualifiedName~MessageCountEstimatorSpecs|FullyQualifiedName~MessageFilterFactorySpecs|FullyQualifiedName~RecentExportDirsSpecs|FullyQualifiedName~SqliteMessageWriterSpecs|FullyQualifiedName~SqliteExportReaderSpecs"
+          --logger "GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true"
+
+      - name: Run GUI tests
+        run: >
+          dotnet test DiscordChatExporter.Gui.Tests
+          -p:CSharpier_Bypass=true
+          --configuration Release
+          --logger "GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true"
+
+      - name: Run live-token CLI tests
+        if: ${{ github.event_name != 'pull_request' }}
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
         run: >
-          dotnet test
+          dotnet test DiscordChatExporter.Cli.Tests
           -p:CSharpier_Bypass=true
           --configuration Release
           --logger "GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true"
@@ -81,6 +94,7 @@ jobs:
           DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
       - name: Upload coverage
+        if: ${{ github.event_name != 'pull_request' }}
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

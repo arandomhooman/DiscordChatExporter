@@ -1,5 +1,5 @@
 #!/usr/bin/dotnet --
-#:package CliFx
+#:package CliFx@3.0.0
 
 using CliFx;
 using CliFx.Binding;

@@ -30,6 +30,7 @@ public static class SqliteExportInspector
         try
         {
             await connection.OpenAsync(cancellationToken);
+            await ValidateSchemaAsync(connection, cancellationToken);
 
             string channelIdText;
             string? afterText;
@@ -100,6 +101,37 @@ public static class SqliteExportInspector
                 $"'{filePath}' is not a valid SQLite chat export.",
                 ex
             );
+        }
+    }
+
+    private static async ValueTask ValidateSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken
+    )
+    {
+        foreach (
+            var tableName in new[]
+            {
+                "export_info",
+                "authors",
+                "messages",
+                "attachments",
+                "reactions",
+                "messages_fts",
+            }
+        )
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('table', 'virtual table') AND name = $name;";
+            command.Parameters.AddWithValue("$name", tableName);
+
+            if ((long)(await command.ExecuteScalarAsync(cancellationToken))! <= 0)
+            {
+                throw new InvalidExportException(
+                    $"The SQLite export is missing the required '{tableName}' table."
+                );
+            }
         }
     }
 

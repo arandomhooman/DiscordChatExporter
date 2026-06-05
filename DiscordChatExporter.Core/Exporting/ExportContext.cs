@@ -205,13 +205,12 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
             var roleIds = member.RoleIds.Select(ParseSnowflake).ToArray();
             var fallbackUser = fallbackUsersById.GetValueOrDefault(id);
             var avatarUrl = fallbackUser?.AvatarUrl ?? member.AvatarUrl ?? "";
-            var user =
-                fallbackUser is not null
-                    ? fallbackUser with
-                    {
-                        AvatarUrl = avatarUrl,
-                    }
-                    : new User(id, false, null, member.DisplayName, member.DisplayName, avatarUrl);
+            var user = fallbackUser is not null
+                ? fallbackUser with
+                {
+                    AvatarUrl = avatarUrl,
+                }
+                : new User(id, false, null, member.DisplayName, member.DisplayName, avatarUrl);
             _membersById[id] = new Member(user, member.DisplayName, avatarUrl, roleIds);
         }
     }
@@ -240,7 +239,7 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
         CancellationToken cancellationToken = default
     )
     {
-        if (!Request.ShouldDownloadAssets)
+        if (!Request.ShouldDownloadAssets || !IsDownloadableAssetUrl(url))
             return url;
 
         try
@@ -281,4 +280,8 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
             return url;
         }
     }
+
+    private static bool IsDownloadableAssetUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && uri.Scheme is "http" or "https";
 }

@@ -154,10 +154,12 @@ public sealed class JsonExportReaderSpecs : IDisposable
     {
         var path = Path.Combine(_dir, "embed-raw-markdown.json");
         var author = CreateUser(10, "alice");
-        await using (var writer = new JsonMessageWriter(
-            File.Create(path),
-            CreateContext(path, shouldFormatMarkdown: true)
-        ))
+        await using (
+            var writer = new JsonMessageWriter(
+                File.Create(path),
+                CreateContext(path, shouldFormatMarkdown: true)
+            )
+        )
         {
             await writer.WritePreambleAsync();
             await writer.WriteMessageAsync(

@@ -53,6 +53,7 @@ public partial class DashboardViewModel : ViewModelBase
 
     private long?[] _estimatedMessagesByChannel = [];
     private long[] _messagesReadByChannel = [];
+    private double[] _progressFractionByChannel = [];
     private DateTimeOffset?[] _currentTimestampByChannel = [];
     private bool[] _completedChannels = [];
     private long _lastRateMessagesRead;
@@ -337,6 +338,7 @@ public partial class DashboardViewModel : ViewModelBase
 
             AvailableChannels = null;
             SelectedChannels.Clear();
+            ClearFailedExportState();
 
             var channels = new List<Channel>();
 
@@ -449,6 +451,7 @@ public partial class DashboardViewModel : ViewModelBase
         {
             _estimatedMessagesByChannel = [];
             _messagesReadByChannel = [];
+            _progressFractionByChannel = [];
             _currentTimestampByChannel = [];
             _completedChannels = [];
             _lastRateMessagesRead = 0;
@@ -474,6 +477,7 @@ public partial class DashboardViewModel : ViewModelBase
         {
             _estimatedMessagesByChannel = estimatedMessagesByChannel.ToArray();
             _messagesReadByChannel = new long[_estimatedMessagesByChannel.Length];
+            _progressFractionByChannel = new double[_estimatedMessagesByChannel.Length];
             _currentTimestampByChannel = new DateTimeOffset?[_estimatedMessagesByChannel.Length];
             _completedChannels = new bool[_estimatedMessagesByChannel.Length];
             _lastRateMessagesRead = 0;
@@ -536,12 +540,43 @@ public partial class DashboardViewModel : ViewModelBase
         lock (_exportProgressLock)
         {
             var messagesRead = _messagesReadByChannel.Sum();
-            var estimatedTotal = _estimatedMessagesByChannel.All(t => t is not null)
-                ? _estimatedMessagesByChannel.Sum(t => t!.Value)
-                : (long?)null;
+            var estimatedTotal = GetCorrectedEstimatedTotal(messagesRead);
             var currentTimestamp = _currentTimestampByChannel.LastOrDefault(t => t is not null);
             return (messagesRead, estimatedTotal, currentTimestamp);
         }
+    }
+
+    private long? GetCorrectedEstimatedTotal(long messagesRead)
+    {
+        if (
+            _estimatedMessagesByChannel.Length == 0
+            || _estimatedMessagesByChannel.Any(t => t is null)
+        )
+        {
+            return null;
+        }
+
+        var modeledWalked = 0.0;
+        var modeledRemaining = 0.0;
+        for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
+        {
+            var estimate = _estimatedMessagesByChannel[i]!.Value;
+            var fraction = _completedChannels[i]
+                ? 1
+                : Math.Clamp(_progressFractionByChannel[i], 0, 1);
+
+            modeledWalked += estimate * fraction;
+            modeledRemaining += estimate * (1 - fraction);
+        }
+
+        if (messagesRead > 0 && modeledWalked > 0)
+        {
+            var correction = messagesRead / modeledWalked;
+            var correctedTotal = messagesRead + correction * modeledRemaining;
+            return Math.Max(messagesRead, (long)Math.Ceiling(correctedTotal));
+        }
+
+        return _estimatedMessagesByChannel.Sum(t => t!.Value);
     }
 
     private void UpdateDisplayedProgressFraction(long messagesRead, long? estimatedTotal)
@@ -568,6 +603,10 @@ public partial class DashboardViewModel : ViewModelBase
             _messagesReadByChannel[index] = Math.Max(
                 _messagesReadByChannel[index],
                 progress.MessagesRead
+            );
+            _progressFractionByChannel[index] = Math.Max(
+                _progressFractionByChannel[index],
+                progress.Fraction.Fraction
             );
             _currentTimestampByChannel[index] = progress.CurrentTimestamp;
         }
@@ -603,6 +642,7 @@ public partial class DashboardViewModel : ViewModelBase
             {
                 _completedChannels[index] = true;
                 _estimatedMessagesByChannel[index] = _messagesReadByChannel[index];
+                _progressFractionByChannel[index] = 1;
                 isRunCompleted = _completedChannels.All(c => c);
             }
         }
@@ -867,7 +907,7 @@ public partial class DashboardViewModel : ViewModelBase
     // After a continue grows an existing export file, refresh its manifest entry (fresh count,
     // size, and hash) and register its folder so the Library catalog stays in sync. Best-effort:
     // a catalog failure must never fail the continue itself.
-    private async Task RefreshContinuedExportCatalogAsync(
+    private async Task<bool> RefreshContinuedExportCatalogAsync(
         string filePath,
         Guild guild,
         Channel channel,
@@ -879,7 +919,7 @@ public partial class DashboardViewModel : ViewModelBase
         {
             var dir = Path.GetDirectoryName(filePath);
             if (string.IsNullOrEmpty(dir))
-                return;
+                return false;
 
             var fileName = Path.GetFileName(filePath);
             var existing = await ManifestReader.TryReadAsync(
@@ -909,14 +949,15 @@ public partial class DashboardViewModel : ViewModelBase
 
             var entries = ManifestBuilder.Build(info, result, DateTimeOffset.Now);
             if (entries.Count == 0)
-                return;
+                return false;
 
             // Continue doesn't re-scan the whole file, so carry the first-message metadata forward
             // from the prior entry rather than nulling it; count/size/hash above are freshly read.
             if (prior is not null)
             {
-                var appendedFile = appendedResult
-                    ?.Files.LastOrDefault(file => file.MessageCount > 0);
+                var appendedFile = appendedResult?.Files.LastOrDefault(file =>
+                    file.MessageCount > 0
+                );
                 var hasAppendedMessages = appendedResult?.MessageCount > 0;
                 entries =
                 [
@@ -937,11 +978,13 @@ public partial class DashboardViewModel : ViewModelBase
 
             await ManifestWriter.WriteAsync(dir, entries, DateTimeOffset.Now);
             RegisterExportedDirs([dir]);
+            return true;
         }
         catch (Exception ex)
             when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             // Best-effort: a catalog refresh failure must not fail the continue itself.
+            return false;
         }
     }
 
@@ -955,6 +998,19 @@ public partial class DashboardViewModel : ViewModelBase
         var requests = channels
             .Select(c => (Channel: c, Request: BuildExportRequest(dialog, c)))
             .ToArray();
+
+        var duplicateOutputPaths = ExportOutputPathValidator.GetDuplicateOutputFilePaths(
+            requests.Select(r => r.Request)
+        );
+        if (duplicateOutputPaths.Count > 0)
+        {
+            throw new ApplicationException(
+                "Multiple selected channels would be exported to the same output file. "
+                    + "Choose an output folder or use a unique template token such as %c. "
+                    + "Conflicting output path(s): "
+                    + string.Join(", ", duplicateOutputPaths)
+            );
+        }
 
         // Resume detection: which selected channels are already exported in their target directory?
         var manifestsByDir = new Dictionary<string, ExportManifest?>(
@@ -981,13 +1037,6 @@ public partial class DashboardViewModel : ViewModelBase
 
         var toExport = requests;
 
-        if (alreadyDone.Count == requests.Length)
-        {
-            // Everything is already exported here — nothing to do.
-            _snackbarManager.Notify(LocalizationManager.ResumeAllUpToDateMessage.TrimEnd('.'));
-            return [];
-        }
-
         if (alreadyDone.Count > 0)
         {
             var prompt = _viewModelManager.GetMessageBoxViewModel(
@@ -1004,6 +1053,9 @@ public partial class DashboardViewModel : ViewModelBase
                 _snackbarManager.Notify(
                     string.Format(LocalizationManager.ResumeSkippedMessage, alreadyDone.Count)
                 );
+
+                if (toExport.Length == 0)
+                    return [];
             }
         }
 
@@ -1297,6 +1349,13 @@ public partial class DashboardViewModel : ViewModelBase
                 DateTimeOffset.Now
             );
             var newMessages = total - countBefore;
+            var isCatalogRefreshed = await RefreshContinuedExportCatalogAsync(
+                filePath,
+                guild,
+                channel,
+                total,
+                appendedResult
+            );
 
             if (newMessages <= 0)
             {
@@ -1311,10 +1370,10 @@ public partial class DashboardViewModel : ViewModelBase
                 );
             }
 
-            // Keep the Library catalog in sync with the file we just grew, and remember its folder.
-            // Continue is the third write path and previously updated neither, leaving a stale
-            // message count and never surfacing continue-only folders.
-            await RefreshContinuedExportCatalogAsync(filePath, guild, channel, total, appendedResult);
+            if (!isCatalogRefreshed)
+                _snackbarManager.Notify(
+                    LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.')
+                );
         }
         catch (DiscordChatExporterException ex) when (!ex.IsFatal)
         {

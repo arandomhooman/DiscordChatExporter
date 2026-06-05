@@ -205,6 +205,9 @@ public abstract class ExportCommandBase : DiscordCommandBase
             await console.Output.WriteLineAsync($"Fetched {fetchedThreadsCount} thread(s).");
         }
 
+        if (unwrappedChannels.Count <= 0)
+            throw new CommandException("No channels matched the provided export options.");
+
         // Make sure the user does not try to export multiple channels into one file.
         // Output path must either be a directory or contain template tokens for this to work.
         // https://github.com/Tyrrrz/DiscordChatExporter/issues/799
@@ -227,11 +230,66 @@ public abstract class ExportCommandBase : DiscordCommandBase
             );
         }
 
-        // Export
         var errorsByChannel = new ConcurrentDictionary<Channel, string>();
         var warningsByChannel = new ConcurrentDictionary<Channel, string>();
+        var guildsById = new Dictionary<Snowflake, Guild>();
+        var exportJobs = new List<ExportJob>();
 
-        await console.Output.WriteLineAsync($"Exporting {unwrappedChannels.Count} channel(s)...");
+        foreach (var channel in unwrappedChannels)
+        {
+            try
+            {
+                var guild = guildsById.GetValueOrDefault(channel.GuildId);
+                if (guild is null)
+                {
+                    guild = await Discord.GetGuildAsync(channel.GuildId, cancellationToken);
+                    guildsById[channel.GuildId] = guild;
+                }
+
+                exportJobs.Add(
+                    new ExportJob(
+                        channel,
+                        new ExportRequest(
+                            guild,
+                            channel,
+                            OutputPath,
+                            AssetsDirPath,
+                            ExportFormat,
+                            After,
+                            Before,
+                            PartitionLimit,
+                            MessageFilter,
+                            IsReverseMessageOrder,
+                            ShouldFormatMarkdown,
+                            ShouldDownloadAssets,
+                            ShouldReuseAssets,
+                            Locale,
+                            IsUtcNormalizationEnabled
+                        )
+                    )
+                );
+            }
+            catch (DiscordChatExporterException ex) when (!ex.IsFatal)
+            {
+                errorsByChannel[channel] = ex.Message;
+            }
+        }
+
+        var duplicateOutputPaths = ExportOutputPathValidator.GetDuplicateOutputFilePaths(
+            exportJobs.Select(j => j.Request)
+        );
+        if (duplicateOutputPaths.Count > 0)
+        {
+            throw new CommandException(
+                "Multiple channels would be exported to the same output file. "
+                    + "Use a directory path or include a unique template token such as %c. "
+                    + "Conflicting output path(s): "
+                    + string.Join(", ", duplicateOutputPaths)
+            );
+        }
+
+        // Export
+        await console.Output.WriteLineAsync($"Exporting {exportJobs.Count} channel(s)...");
         await console
             .CreateProgressTicker()
             .HideCompleted(
@@ -243,46 +301,24 @@ public abstract class ExportCommandBase : DiscordCommandBase
             .StartAsync(async ctx =>
             {
                 await Parallel.ForEachAsync(
-                    unwrappedChannels,
+                    exportJobs,
                     new ParallelOptions
                     {
                         MaxDegreeOfParallelism = Math.Max(1, ParallelLimit),
                         CancellationToken = cancellationToken,
                     },
-                    async (channel, innerCancellationToken) =>
+                    async (job, innerCancellationToken) =>
                     {
+                        var channel = job.Channel;
                         try
                         {
                             await ctx.StartTaskAsync(
                                 Markup.Escape(channel.GetHierarchicalName()),
                                 async progress =>
                                 {
-                                    var guild = await Discord.GetGuildAsync(
-                                        channel.GuildId,
-                                        innerCancellationToken
-                                    );
-
-                                    var request = new ExportRequest(
-                                        guild,
-                                        channel,
-                                        OutputPath,
-                                        AssetsDirPath,
-                                        ExportFormat,
-                                        After,
-                                        Before,
-                                        PartitionLimit,
-                                        MessageFilter,
-                                        IsReverseMessageOrder,
-                                        ShouldFormatMarkdown,
-                                        ShouldDownloadAssets,
-                                        ShouldReuseAssets,
-                                        Locale,
-                                        IsUtcNormalizationEnabled
-                                    );
-
                                     var percentageProgress = progress.ToPercentageBased();
                                     await Exporter.ExportChannelAsync(
-                                        request,
+                                        job.Request,
                                         new System.Progress<ExportProgress>(p =>
                                             percentageProgress.Report(p.Fraction)
                                         ),
@@ -358,6 +394,8 @@ public abstract class ExportCommandBase : DiscordCommandBase
         if (errorsByChannel.Count >= unwrappedChannels.Count)
             throw new CommandException("Export failed.");
     }
+
+    private sealed record ExportJob(Channel Channel, ExportRequest Request);
 
     public override async ValueTask ExecuteAsync(IConsole console)
     {
