@@ -89,7 +89,7 @@ public partial class DashboardViewModel : ViewModelBase
                 _ =>
                     Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                     {
-                        if (!_isExportProgressRunActive || !HasCompleteCountEstimate())
+                        if (!_isExportProgressRunActive || !HasAnyCountEstimate())
                             DisplayedProgressFraction = Progress.Current.Fraction;
 
                         OnPropertyChanged(nameof(IsProgressIndeterminate));
@@ -525,12 +525,12 @@ public partial class DashboardViewModel : ViewModelBase
             Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyExportProgress(index, progress));
         });
 
-    private bool HasCompleteCountEstimate()
+    private bool HasAnyCountEstimate()
     {
         lock (_exportProgressLock)
         {
             return _estimatedMessagesByChannel.Length > 0
-                && _estimatedMessagesByChannel.All(t => t is not null);
+                && _estimatedMessagesByChannel.Any(t => t is not null);
         }
     }
 
@@ -551,19 +551,32 @@ public partial class DashboardViewModel : ViewModelBase
 
     private long? GetCorrectedEstimatedTotal(long messagesRead)
     {
+        // Engage count-based progress as long as we counted AT LEAST ONE channel. (Reverting the
+        // whole bar to the timestamp fraction the moment one channel was uncountable is what made
+        // the ETA janky.) Channels we couldn't count borrow a fallback total — the mean of the
+        // channels we did count — which the messages-read correction below then self-adjusts.
         if (
             _estimatedMessagesByChannel.Length == 0
-            || _estimatedMessagesByChannel.Any(t => t is null)
+            || _estimatedMessagesByChannel.All(t => t is null)
         )
         {
             return null;
         }
 
+        var counted = _estimatedMessagesByChannel
+            .Where(t => t is not null)
+            .Select(t => t!.Value)
+            .ToArray();
+        var fallback = counted.Length > 0 ? (long)Math.Ceiling(counted.Average()) : 0;
+
         var modeledWalked = 0.0;
         var modeledRemaining = 0.0;
         for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
         {
-            var estimate = _estimatedMessagesByChannel[i]!.Value;
+            // For an uncounted channel, assume the fallback total, but never less than what it has
+            // already read (so its contribution can't shrink below reality).
+            var estimate =
+                _estimatedMessagesByChannel[i] ?? Math.Max(fallback, _messagesReadByChannel[i]);
             var fraction = _completedChannels[i]
                 ? 1
                 : Math.Clamp(_progressFractionByChannel[i], 0, 1);
@@ -579,7 +592,11 @@ public partial class DashboardViewModel : ViewModelBase
             return Math.Max(messagesRead, (long)Math.Ceiling(correctedTotal));
         }
 
-        return _estimatedMessagesByChannel.Sum(t => t!.Value);
+        // No reads yet: sum counted channels plus the fallback for the uncounted ones.
+        long sum = 0;
+        for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
+            sum += _estimatedMessagesByChannel[i] ?? fallback;
+        return sum;
     }
 
     private void UpdateDisplayedProgressFraction(long messagesRead, long? estimatedTotal)

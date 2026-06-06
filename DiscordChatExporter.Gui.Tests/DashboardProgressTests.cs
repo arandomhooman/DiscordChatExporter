@@ -51,7 +51,11 @@ public sealed class DashboardProgressTests
         return provider.GetRequiredService<DashboardViewModel>();
     }
 
-    private static void Invoke(DashboardViewModel viewModel, string methodName, params object?[] args)
+    private static void Invoke(
+        DashboardViewModel viewModel,
+        string methodName,
+        params object?[] args
+    )
     {
         var method = typeof(DashboardViewModel).GetMethod(
             methodName,
@@ -135,10 +139,13 @@ public sealed class DashboardProgressTests
     }
 
     [AvaloniaFact]
-    public void Mixed_missing_estimate_leaves_fallback_fraction_owned_by_muxer()
+    public void Mixed_missing_estimate_still_uses_count_based_progress()
     {
         var viewModel = CreateViewModel();
 
+        // One channel counted (2), one uncountable (null). The uncounted channel borrows the
+        // counted channel's total as a fallback, so the bar stays count-based instead of reverting
+        // to the muxer's timestamp fraction (which would read ~0.25 here).
         Invoke(viewModel, "StartExportProgressRun", new long?[] { 2, null });
         viewModel.Progress.Report(Percentage.FromFraction(0.25));
         Dispatcher.UIThread.RunJobs();
@@ -150,7 +157,9 @@ public sealed class DashboardProgressTests
             new ExportProgress(Percentage.FromFraction(0.9), 1, DateTimeOffset.UnixEpoch)
         );
 
-        viewModel.DisplayedProgressFraction.Should().BeApproximately(0.25, 0.0001);
+        // read=1 over a modeled total of ~3 (fallback 2 for the uncounted channel, corrected by the
+        // 1 message actually read at fraction 0.9) -> ~0.333, NOT the muxer's 0.25.
+        viewModel.DisplayedProgressFraction.Should().BeApproximately(1.0 / 3, 0.02);
     }
 
     [AvaloniaFact]
@@ -205,22 +214,12 @@ public sealed class DashboardProgressTests
 
         viewModel.IsRateLimitPaused.Should().BeTrue();
 
-        Invoke(
-            viewModel,
-            "HandleRateLimitChanged",
-            null,
-            new RateLimitState(false, TimeSpan.Zero)
-        );
+        Invoke(viewModel, "HandleRateLimitChanged", null, new RateLimitState(false, TimeSpan.Zero));
         Dispatcher.UIThread.RunJobs();
 
         viewModel.IsRateLimitPaused.Should().BeTrue();
 
-        Invoke(
-            viewModel,
-            "HandleRateLimitChanged",
-            null,
-            new RateLimitState(false, TimeSpan.Zero)
-        );
+        Invoke(viewModel, "HandleRateLimitChanged", null, new RateLimitState(false, TimeSpan.Zero));
         Dispatcher.UIThread.RunJobs();
 
         viewModel.IsRateLimitPaused.Should().BeFalse();
