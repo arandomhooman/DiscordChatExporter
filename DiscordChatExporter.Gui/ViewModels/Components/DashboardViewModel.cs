@@ -530,7 +530,7 @@ public partial class DashboardViewModel : ViewModelBase
         lock (_exportProgressLock)
         {
             return _estimatedMessagesByChannel.Length > 0
-                && _estimatedMessagesByChannel.Any(t => t is not null);
+                && _estimatedMessagesByChannel.Any(t => t is > 0);
         }
     }
 
@@ -551,20 +551,20 @@ public partial class DashboardViewModel : ViewModelBase
 
     private long? GetCorrectedEstimatedTotal(long messagesRead)
     {
-        // Engage count-based progress as long as we counted AT LEAST ONE channel. (Reverting the
-        // whole bar to the timestamp fraction the moment one channel was uncountable is what made
-        // the ETA janky.) Channels we couldn't count borrow a fallback total — the mean of the
-        // channels we did count — which the messages-read correction below then self-adjusts.
+        // Engage count-based progress as long as we counted at least one positive-total channel.
+        // Channels we couldn't count borrow a fallback total: the mean of the channels we did
+        // count, which the messages-read correction below then self-adjusts. Completed empty
+        // channels stay at zero, but they must not become the fallback sample.
         if (
             _estimatedMessagesByChannel.Length == 0
-            || _estimatedMessagesByChannel.All(t => t is null)
+            || _estimatedMessagesByChannel.All(t => t is not > 0)
         )
         {
             return null;
         }
 
         var counted = _estimatedMessagesByChannel
-            .Where(t => t is not null)
+            .Where(t => t is > 0)
             .Select(t => t!.Value)
             .ToArray();
         var fallback = counted.Length > 0 ? (long)Math.Ceiling(counted.Average()) : 0;

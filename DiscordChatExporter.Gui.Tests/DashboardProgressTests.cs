@@ -66,6 +66,21 @@ public sealed class DashboardProgressTests
         method!.Invoke(viewModel, args);
     }
 
+    private static T? Invoke<T>(
+        DashboardViewModel viewModel,
+        string methodName,
+        params object?[] args
+    )
+    {
+        var method = typeof(DashboardViewModel).GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.NonPublic
+        );
+
+        method.Should().NotBeNull();
+        return (T?)method!.Invoke(viewModel, args);
+    }
+
     [AvaloniaFact]
     public void Completed_channel_shrinks_overestimated_total_to_actual_messages_read()
     {
@@ -163,6 +178,26 @@ public sealed class DashboardProgressTests
     }
 
     [AvaloniaFact]
+    public void Completed_empty_unknown_channel_does_not_enable_count_based_progress()
+    {
+        var viewModel = CreateViewModel();
+
+        Invoke(viewModel, "StartExportProgressRun", new long?[] { null, null });
+        viewModel.Progress.Report(Percentage.FromFraction(0.25));
+        Dispatcher.UIThread.RunJobs();
+
+        Invoke(viewModel, "MarkExportProgressCompleted", 0);
+        Invoke(
+            viewModel,
+            "ApplyExportProgress",
+            1,
+            new ExportProgress(Percentage.FromFraction(0), 1, DateTimeOffset.UnixEpoch)
+        );
+
+        viewModel.DisplayedProgressFraction.Should().BeApproximately(0.25, 0.0001);
+    }
+
+    [AvaloniaFact]
     public void Status_text_shows_messages_left_when_total_is_known()
     {
         var viewModel = CreateViewModel();
@@ -194,6 +229,16 @@ public sealed class DashboardProgressTests
 
         viewModel.MessagesReadText.Should().NotBeNull();
         viewModel.MessagesReadText.Should().NotContain("left");
+    }
+
+    [AvaloniaFact]
+    public void Status_text_hides_messages_left_when_total_is_overrun()
+    {
+        var viewModel = CreateViewModel();
+
+        var text = Invoke<string>(viewModel, "FormatMessagesRead", 5L, 2L);
+
+        text.Should().Be("5 messages");
     }
 
     [AvaloniaFact]
