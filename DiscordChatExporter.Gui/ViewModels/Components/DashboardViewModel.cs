@@ -1367,7 +1367,9 @@ public partial class DashboardViewModel : ViewModelBase
     private static bool ShouldPromptAnchorPicker(ContinueDiscoveryResult result) =>
         result.Resolved.Count == 0;
 
-    private async Task<IReadOnlyList<ResolvedContinueTarget>> HydrateDiscoveredContinueTargetsAsync(
+    internal async Task<
+        IReadOnlyList<ResolvedContinueTarget>
+    > HydrateDiscoveredContinueTargetsAsync(
         IReadOnlyList<ResolvedCatalogEntry> entries,
         Guild selectedGuild,
         IReadOnlyDictionary<Snowflake, Channel> selectedChannelsById,
@@ -1378,7 +1380,24 @@ public partial class DashboardViewModel : ViewModelBase
 
         foreach (var entry in entries)
         {
-            var cutoff = await ContinuationFormat.ReadCutoffAsync(entry.FilePath);
+            // The cutoff read happens up front, outside the per-channel export loop's isolation,
+            // so a single empty or unreadable existing export (e.g. a JSON with no messages) must
+            // not be allowed to abort the whole batch — skip that channel and continue.
+            ContinuationCutoff cutoff;
+            try
+            {
+                cutoff = await ContinuationFormat.ReadCutoffAsync(entry.FilePath);
+            }
+            catch (DiscordChatExporterException ex) when (!ex.IsFatal)
+            {
+                unresolved.Add(
+                    new UnresolvedCatalogChannel(
+                        entry.ChannelId,
+                        ContinueSkipReason.CutoffUnreadable
+                    )
+                );
+                continue;
+            }
 
             if (!cutoff.IsChronological)
             {

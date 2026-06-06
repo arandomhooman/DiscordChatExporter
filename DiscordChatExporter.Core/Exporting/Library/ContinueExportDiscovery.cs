@@ -103,4 +103,8 @@ public enum ContinueSkipReason
     UnsupportedFormat,
     UnknownFormat,
     ReverseChronological,
+
+    // The existing export file can't yield a resume point: it has no messages, or its cutoff
+    // couldn't be read (empty/corrupt). Emitted during VM hydration, not by the Core resolver.
+    CutoffUnreadable,
 }

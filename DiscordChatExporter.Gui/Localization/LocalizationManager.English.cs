@@ -42,7 +42,7 @@ public partial class LocalizationManager
                 "Continuing partitioned exports is not supported.",
             [nameof(ContinueExportFormatUnsupportedMessage)] =
                 "Continuing this file type is not supported (JSON, HTML, CSV, and SQLite are).",
-            [nameof(ContinueExportSkippedTail)] = "{0} had no existing export, skipped",
+            [nameof(ContinueExportSkippedTail)] = "{0} skipped (no resumable export)",
             [nameof(ContinueExportFailedTail)] = "{0} failed",
             [nameof(SettingsTooltip)] = "Settings",
             [nameof(LibraryTooltip)] = "Library",

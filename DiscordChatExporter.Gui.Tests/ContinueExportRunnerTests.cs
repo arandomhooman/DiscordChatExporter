@@ -8,6 +8,7 @@ using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exceptions;
 using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Continuation;
+using DiscordChatExporter.Core.Exporting.Library;
 using DiscordChatExporter.Gui.Framework;
 using DiscordChatExporter.Gui.Localization;
 using DiscordChatExporter.Gui.Services;
@@ -102,7 +103,9 @@ public sealed class ContinueExportRunnerTests
             CancellationToken.None
         );
 
-        observed.Should().Equal(targets[0].Channel.Id, targets[1].Channel.Id, targets[2].Channel.Id);
+        observed
+            .Should()
+            .Equal(targets[0].Channel.Id, targets[1].Channel.Id, targets[2].Channel.Id);
         summary.ProcessedCount.Should().Be(2);
         summary.TotalNewMessages.Should().Be(4);
         summary.FailedChannels.Should().ContainSingle().Which.Should().Be(targets[1].Channel);
@@ -145,7 +148,11 @@ public sealed class ContinueExportRunnerTests
                 Task.FromResult(
                     target.Channel.Id == new Snowflake(20)
                         ? ContinueExportFileResult.Skipped
-                        : new ContinueExportFileResult(true, (long)target.Channel.Id.Value / 10, true)
+                        : new ContinueExportFileResult(
+                            true,
+                            (long)target.Channel.Id.Value / 10,
+                            true
+                        )
                 ),
             CancellationToken.None
         );
@@ -211,8 +218,74 @@ public sealed class ContinueExportRunnerTests
         var message = viewModel.FormatContinueSummary(summary, skippedCount: 2);
 
         message.Should().Contain("Added 3 new message(s).");
-        message.Should().Contain("2 had no existing export, skipped");
+        message.Should().Contain("2 skipped (no resumable export)");
         message.Should().Contain("1 failed");
         message.Should().Contain(viewModel.LocalizationManager.ExportCatalogWriteFailedMessage);
     }
+
+    // Regression: a message-less (or otherwise unreadable) export must be skipped during the
+    // up-front cutoff read, NOT abort the whole batch. This is the "selected export has nothing
+    // to continue from" crash that aborted Continue when any one resolved export was empty.
+    [Fact]
+    public async Task Hydration_skips_an_empty_export_instead_of_aborting_the_batch()
+    {
+        var viewModel = CreateViewModel();
+        var guild = new Guild(new Snowflake(1), "Guild", "");
+        var good = MakeChannel(200);
+        var empty = MakeChannel(300);
+
+        var dir = Path.Combine(Path.GetTempPath(), "DceHydration_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var goodPath = Path.Combine(dir, "good.json");
+            var emptyPath = Path.Combine(dir, "empty.json");
+            File.WriteAllText(
+                goodPath,
+                """{"guild":{"id":"1"},"channel":{"id":"200"},"messages":[{"id":"1000","timestamp":"2020-01-01T00:00:00.000+00:00"}]}"""
+            );
+            File.WriteAllText(
+                emptyPath,
+                """{"guild":{"id":"1"},"channel":{"id":"300"},"messages":[]}"""
+            );
+
+            var entries = new[]
+            {
+                new ResolvedCatalogEntry(good.Id, goodPath, ExportFormat.Json),
+                new ResolvedCatalogEntry(empty.Id, emptyPath, ExportFormat.Json),
+            };
+            var byId = new Dictionary<Snowflake, Channel> { [good.Id] = good, [empty.Id] = empty };
+            var unresolved = new List<UnresolvedCatalogChannel>();
+
+            var targets = await viewModel.HydrateDiscoveredContinueTargetsAsync(
+                entries,
+                guild,
+                byId,
+                unresolved
+            );
+
+            targets.Should().ContainSingle().Which.Channel.Id.Should().Be(good.Id);
+            unresolved.Should().ContainSingle();
+            unresolved[0].ChannelId.Should().Be(empty.Id);
+            unresolved[0].Reason.Should().Be(ContinueSkipReason.CutoffUnreadable);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    private static Channel MakeChannel(ulong id) =>
+        new(
+            new Snowflake(id),
+            ChannelKind.GuildTextChat,
+            new Snowflake(1),
+            null,
+            "channel-" + id,
+            0,
+            null,
+            null,
+            false,
+            new Snowflake(id + 1000)
+        );
 }
