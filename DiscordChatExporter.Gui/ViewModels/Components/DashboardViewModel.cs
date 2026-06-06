@@ -498,13 +498,16 @@ public partial class DashboardViewModel : ViewModelBase
         for (var i = 0; i < requests.Count; i++)
         {
             var request = requests[i];
-            var total =
-                await _discord.CountMessagesAsync(request.Channel, request.After, request.Before)
-                ?? await _discord.EstimateMessageCountByDensityAsync(
-                    request.Channel,
-                    request.After,
-                    request.Before
-                );
+            // Only the cheap search-count call here — it uses a separate rate bucket and one request
+            // per channel. The density fallback was removed: it fired up to ~11 message-endpoint
+            // requests per channel, pre-spending the export's own rate budget in a burst right before
+            // the download (the cause of continue's constant rate-limit pauses). Channels search can't
+            // count get a null total; GetCorrectedEstimatedTotal now tolerates that (see Task 2).
+            var total = await _discord.CountMessagesAsync(
+                request.Channel,
+                request.After,
+                request.Before
+            );
 
             totals[i] = total is > 0 ? total : null;
         }
