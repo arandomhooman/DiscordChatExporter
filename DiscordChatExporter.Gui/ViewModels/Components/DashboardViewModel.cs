@@ -1590,10 +1590,7 @@ public partial class DashboardViewModel : ViewModelBase
         );
     }
 
-    internal string FormatContinueSummary(
-        ContinueExportRunSummary summary,
-        int skippedCount
-    )
+    internal string FormatContinueSummary(ContinueExportRunSummary summary, int skippedCount)
     {
         var parts = new List<string>();
 

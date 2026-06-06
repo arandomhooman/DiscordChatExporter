@@ -28,9 +28,7 @@ public static class ContinueExportDiscovery
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var candidates = entries
-                .Where(e => e.ChannelId == channelId.ToString())
-                .ToArray();
+            var candidates = entries.Where(e => e.ChannelId == channelId.ToString()).ToArray();
 
             if (candidates.Length == 0)
             {
@@ -90,10 +88,7 @@ public sealed record ResolvedCatalogEntry(
     ExportFormat Format
 );
 
-public sealed record UnresolvedCatalogChannel(
-    Snowflake ChannelId,
-    ContinueSkipReason Reason
-);
+public sealed record UnresolvedCatalogChannel(Snowflake ChannelId, ContinueSkipReason Reason);
 
 public sealed record ContinueDiscoveryResult(
     IReadOnlyList<ResolvedCatalogEntry> Resolved,
