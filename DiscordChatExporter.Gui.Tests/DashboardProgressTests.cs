@@ -242,6 +242,25 @@ public sealed class DashboardProgressTests
     }
 
     [AvaloniaFact]
+    public void No_eta_is_shown_without_a_count_estimate()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsBusy = true;
+
+        // No positive count (e.g. a continue, which no longer estimates) -> the only progress signal
+        // is the biased timestamp fraction, so the ETA must stay hidden rather than show a bad guess.
+        Invoke(viewModel, "StartExportProgressRun", new long?[] { (long?)null });
+        Invoke(
+            viewModel,
+            "ApplyExportProgress",
+            0,
+            new ExportProgress(Percentage.FromFraction(0.5), 5, DateTimeOffset.UnixEpoch)
+        );
+
+        viewModel.EtaText.Should().BeNull();
+    }
+
+    [AvaloniaFact]
     public async Task Background_completion_updates_bound_properties_on_ui_thread()
     {
         var viewModel = CreateViewModel();

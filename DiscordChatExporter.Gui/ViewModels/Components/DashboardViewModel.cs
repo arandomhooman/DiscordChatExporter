@@ -1356,11 +1356,12 @@ public partial class DashboardViewModel : ViewModelBase
                 )
                 .ToArray();
             var pairsByTarget = pairs.ToDictionary(p => p.Target);
-            var requests = pairs
-                .Select(p => BuildContinueExportRequest(p.Target, p.Target.FilePath))
-                .ToArray();
 
-            StartExportProgressRun(await EstimateMessageTotalsAsync(requests));
+            // No up-front count estimation on continue: it used Discord's aggressively rate-limited
+            // search endpoint (and usually couldn't size the recent "since last time" range anyway),
+            // which is what caused the ~55s rate-limit stalls. Continue uses the time-based progress
+            // bar only — with no count total there is intentionally no ETA or "messages left".
+            StartExportProgressRun(new long?[pairs.Length]);
 
             var summary = await RunContinueLoopAsync(
                 pairs.Select(p => p.Target).ToArray(),
@@ -1683,7 +1684,10 @@ public partial class DashboardViewModel : ViewModelBase
 
     private void UpdateEta()
     {
-        if (!IsBusy)
+        // Only show a time estimate when it's backed by a real message-count total. Without counts
+        // (continue, or an export whose channels the search endpoint couldn't size) the only progress
+        // signal is the biased message-timestamp fraction, which made the ETA balloon — so show none.
+        if (!IsBusy || !HasAnyCountEstimate())
         {
             EtaText = null;
             return;
