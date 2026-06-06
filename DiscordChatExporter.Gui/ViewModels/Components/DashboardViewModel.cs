@@ -644,7 +644,11 @@ public partial class DashboardViewModel : ViewModelBase
             if (index >= 0 && index < _completedChannels.Length)
             {
                 _completedChannels[index] = true;
-                _estimatedMessagesByChannel[index] = _messagesReadByChannel[index];
+                // Only refine an estimate we actually had. Never fabricate one for an uncounted
+                // channel — completing it would otherwise re-light the "X of N" + ETA display from a
+                // retroactive total, even though no real count was ever queried.
+                if (_estimatedMessagesByChannel[index] is not null)
+                    _estimatedMessagesByChannel[index] = _messagesReadByChannel[index];
                 _progressFractionByChannel[index] = 1;
                 isRunCompleted = _completedChannels.All(c => c);
             }
