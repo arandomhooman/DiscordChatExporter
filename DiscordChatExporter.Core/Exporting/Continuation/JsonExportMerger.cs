@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Exporting.Conversion;
+using DiscordChatExporter.Core.Utils;
 
 namespace DiscordChatExporter.Core.Exporting.Continuation;
 
@@ -46,7 +47,7 @@ public static class JsonExportMerger
                 await writer.FlushAsync(cancellationToken);
             }
 
-            File.Replace(tempPath, existingFilePath, existingFilePath + ".bak");
+            AtomicFile.ReplaceWithBackupCleanup(tempPath, existingFilePath);
         }
         catch
         {

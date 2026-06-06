@@ -55,7 +55,8 @@ public class HtmlExportMergerSpecs
             Regex.Matches(merged, "<div class=\"chatlog\">").Count.Should().Be(1);
             Regex.Matches(merged, "<div class=\"?postamble\"?>").Count.Should().Be(1);
             merged.Should().Contain("Exported 3 message(s)");
-            File.Exists(existing + ".bak").Should().BeTrue();
+            // The atomic-replace .bak is a transient crash-safety net, cleaned up on success.
+            File.Exists(existing + ".bak").Should().BeFalse();
         }
         finally
         {

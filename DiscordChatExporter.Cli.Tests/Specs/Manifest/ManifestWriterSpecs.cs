@@ -72,12 +72,18 @@ public class ManifestWriterSpecs : IDisposable
     }
 
     [Fact]
-    public async Task Writing_over_an_existing_manifest_leaves_a_backup()
+    public async Task Writing_over_an_existing_manifest_cleans_up_the_backup()
     {
         await ManifestWriter.WriteAsync(_dir, [Entry("a.json", 1)], DateTimeOffset.UnixEpoch);
         await ManifestWriter.WriteAsync(_dir, [Entry("a.json", 2)], DateTimeOffset.UnixEpoch);
 
-        File.Exists(Path.Combine(_dir, ExportManifest.FileName + ".bak")).Should().BeTrue();
+        // The overwrite is an atomic replace whose .bak is only a transient crash-safety net; it
+        // must be cleaned up on success so backups don't pile up next to the export.
+        var manifest = await ManifestReader.TryReadAsync(
+            Path.Combine(_dir, ExportManifest.FileName)
+        );
+        manifest!.Entries.Single(e => e.File == "a.json").MessageCount.Should().Be(2);
+        File.Exists(Path.Combine(_dir, ExportManifest.FileName + ".bak")).Should().BeFalse();
     }
 
     [Fact]

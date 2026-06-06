@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AsyncKeyedLock;
+using DiscordChatExporter.Core.Utils;
 
 namespace DiscordChatExporter.Core.Exporting.Manifest;
 
@@ -64,7 +65,7 @@ public static class ManifestWriter
             }
 
             if (File.Exists(manifestPath))
-                File.Replace(tempPath, manifestPath, manifestPath + ".bak");
+                AtomicFile.ReplaceWithBackupCleanup(tempPath, manifestPath);
             else
                 File.Move(tempPath, manifestPath);
         }

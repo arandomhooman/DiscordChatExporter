@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
+using DiscordChatExporter.Core.Utils;
 
 namespace DiscordChatExporter.Core.Exporting.Continuation;
 
@@ -49,7 +50,7 @@ public static class CsvExportMerger
                     added++;
                 }
             }
-            File.Replace(tempPath, existingFilePath, existingFilePath + ".bak");
+            AtomicFile.ReplaceWithBackupCleanup(tempPath, existingFilePath);
         }
         catch
         {

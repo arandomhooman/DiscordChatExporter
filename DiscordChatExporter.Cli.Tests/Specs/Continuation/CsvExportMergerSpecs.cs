@@ -48,7 +48,8 @@ public class CsvExportMergerSpecs
             lines[0].Should().StartWith("AuthorID,");
             lines.Count(l => l.StartsWith("AuthorID,")).Should().Be(1);
             lines.Last().Should().Contain("2021-07-25");
-            File.Exists(existing + ".bak").Should().BeTrue();
+            // The atomic-replace .bak is a transient crash-safety net, cleaned up on success.
+            File.Exists(existing + ".bak").Should().BeFalse();
         }
         finally
         {

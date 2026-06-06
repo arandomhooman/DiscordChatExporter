@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using DiscordChatExporter.Core.Utils;
 
 namespace DiscordChatExporter.Core.Exporting.Continuation;
 
@@ -74,7 +75,7 @@ public static partial class HtmlExportMerger
         try
         {
             await File.WriteAllTextAsync(tempPath, merged, cancellationToken);
-            File.Replace(tempPath, existingFilePath, existingFilePath + ".bak");
+            AtomicFile.ReplaceWithBackupCleanup(tempPath, existingFilePath);
         }
         catch
         {

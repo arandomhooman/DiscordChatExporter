@@ -78,7 +78,8 @@ public class JsonExportMergerSpecs
             root.GetProperty("guild").GetProperty("id").GetString().Should().Be("111");
             root.GetProperty("exportedAt").GetString().Should().Contain("2026-06-03");
 
-            File.Exists(existing + ".bak").Should().BeTrue();
+            // The atomic-replace .bak is a transient crash-safety net, cleaned up on success.
+            File.Exists(existing + ".bak").Should().BeFalse();
         }
         finally
         {
