@@ -905,8 +905,7 @@ public partial class DashboardViewModel : ViewModelBase
     }
 
     // After a continue grows an existing export file, refresh its manifest entry (fresh count,
-    // size, and hash) and register its folder so the Library catalog stays in sync. Best-effort:
-    // a catalog failure must never fail the continue itself.
+    // size, and hash). Best-effort: a catalog failure must never fail the continue itself.
     private async Task<bool> RefreshContinuedExportCatalogAsync(
         string filePath,
         Guild guild,
@@ -977,7 +976,6 @@ public partial class DashboardViewModel : ViewModelBase
             }
 
             await ManifestWriter.WriteAsync(dir, entries, DateTimeOffset.Now);
-            RegisterExportedDirs([dir]);
             return true;
         }
         catch (Exception ex)
@@ -1257,107 +1255,95 @@ public partial class DashboardViewModel : ViewModelBase
 
         var selectedGuild = SelectedGuild;
         var selectedChannels = SelectedChannels.Select(c => c.Channel).ToArray();
-
-        // Pick the existing export (JSON, HTML, CSV, or SQLite)
-        var filePath = await _dialogManager.PromptSingleFilePathAsync(
-            CreateContinueExportFileTypes()
-        );
-        if (string.IsNullOrWhiteSpace(filePath))
-            return;
-
-        // Refuse unsupported file types
-        if (!ContinuationFormat.IsSupportedExtension(filePath))
-        {
-            _snackbarManager.Notify(
-                LocalizationManager.ContinueExportFormatUnsupportedMessage.TrimEnd('.')
-            );
-            return;
-        }
-
-        // Refuse partitioned exports (name- or sibling-based detection)
-        if (IsPartitionedExportPath(filePath))
-        {
-            _snackbarManager.Notify(
-                LocalizationManager.ContinueExportPartitionedUnsupportedMessage.TrimEnd('.')
-            );
-            return;
-        }
+        var selectedChannelsById = selectedChannels.ToDictionary(c => c.Id);
 
         IsBusy = true;
         ResetExportProgressDisplay();
 
         try
         {
-            var anchorCutoff = await ContinuationFormat.ReadCutoffAsync(filePath);
-            var targetFilePaths = ResolveSelectedContinueExportFilePaths(
-                filePath,
-                selectedGuild,
-                selectedChannels,
-                anchorCutoff
+            var selectedChannelIds = selectedChannels.Select(c => c.Id).ToArray();
+            var discovery = await ContinueExportDiscovery.ResolveAsync(
+                _settingsService.KnownExportDirs,
+                selectedChannelIds
             );
 
-            if (targetFilePaths.Count == 0)
+            var unresolved = discovery.Unresolved.ToList();
+            IReadOnlyList<ResolvedContinueTarget> targets;
+            if (ShouldPromptAnchorPicker(discovery))
             {
-                _snackbarManager.Notify(
-                    LocalizationManager.ContinueExportNoSelectedFilesMessage.TrimEnd('.')
-                );
-                return;
-            }
-
-            if (targetFilePaths.Any(IsPartitionedExportPath))
-            {
-                _snackbarManager.Notify(
-                    LocalizationManager.ContinueExportPartitionedUnsupportedMessage.TrimEnd('.')
-                );
-                return;
-            }
-
-            var selectedChannelsById = selectedChannels.ToDictionary(c => c.Id);
-            var exporter = new ChannelExporter(_discord);
-            long totalNewMessages = 0;
-            var processedCount = 0;
-            var catalogWriteFailed = false;
-
-            foreach (var targetFilePath in targetFilePaths)
-            {
-                var result = await ContinueExportFileAsync(
-                    exporter,
-                    targetFilePath,
+                var pickedTarget = await ResolvePickedContinueTargetAsync(
                     selectedGuild,
                     selectedChannelsById
                 );
+                if (pickedTarget is null)
+                    return;
 
-                if (!result.WasProcessed)
-                    continue;
-
-                processedCount++;
-                totalNewMessages += result.NewMessages;
-                catalogWriteFailed |= !result.IsCatalogRefreshed;
-            }
-
-            if (processedCount == 0)
-                return;
-
-            if (totalNewMessages <= 0)
-            {
-                _snackbarManager.Notify(
-                    LocalizationManager.ContinueExportUpToDateMessage.TrimEnd('.')
-                );
+                targets = [pickedTarget];
+                unresolved.Clear();
             }
             else
             {
-                _snackbarManager.Notify(
-                    string.Format(
-                        LocalizationManager.ContinueExportSuccessMessage,
-                        totalNewMessages
-                    )
+                targets = await HydrateDiscoveredContinueTargetsAsync(
+                    discovery.Resolved,
+                    selectedGuild,
+                    selectedChannelsById,
+                    unresolved
                 );
             }
 
-            if (catalogWriteFailed)
-                _snackbarManager.Notify(
-                    LocalizationManager.ExportCatalogWriteFailedMessage.TrimEnd('.')
+            if (targets.Count == 0)
+            {
+                var skippedOnlyMessage = FormatContinueSummary(
+                    new ContinueExportRunSummary(0, 0, false, []),
+                    unresolved.Count
                 );
+                if (!string.IsNullOrWhiteSpace(skippedOnlyMessage))
+                    _snackbarManager.Notify(skippedOnlyMessage.TrimEnd('.'));
+
+                return;
+            }
+
+            var exporter = new ChannelExporter(_discord);
+            var pairs = targets
+                .Select(
+                    (target, index) =>
+                        new
+                        {
+                            Index = index,
+                            Target = target,
+                            Progress = _progressMuxer.CreateInput(),
+                        }
+                )
+                .ToArray();
+            var pairsByTarget = pairs.ToDictionary(p => p.Target);
+            var requests = pairs
+                .Select(p => BuildContinueExportRequest(p.Target, p.Target.FilePath))
+                .ToArray();
+
+            StartExportProgressRun(await EstimateMessageTotalsAsync(requests));
+
+            var summary = await RunContinueLoopAsync(
+                pairs.Select(p => p.Target).ToArray(),
+                (target, cancellationToken) =>
+                {
+                    var pair = pairsByTarget[target];
+                    return ContinueExportFileAsync(
+                        exporter,
+                        target,
+                        pair.Index,
+                        pair.Progress,
+                        cancellationToken
+                    );
+                },
+                CancellationToken.None
+            );
+
+            var message = FormatContinueSummary(summary, unresolved.Count);
+            if (!string.IsNullOrWhiteSpace(message))
+                _snackbarManager.Notify(message.TrimEnd('.'));
+
+            CompletionAttention.FlashIfUnfocused();
         }
         catch (DiscordChatExporterException ex) when (!ex.IsFatal)
         {
@@ -1378,85 +1364,146 @@ public partial class DashboardViewModel : ViewModelBase
         }
     }
 
-    private async Task<ContinueExportFileResult> ContinueExportFileAsync(
-        ChannelExporter exporter,
-        string filePath,
+    private static bool ShouldPromptAnchorPicker(ContinueDiscoveryResult result) =>
+        result.Resolved.Count == 0;
+
+    private async Task<IReadOnlyList<ResolvedContinueTarget>> HydrateDiscoveredContinueTargetsAsync(
+        IReadOnlyList<ResolvedCatalogEntry> entries,
+        Guild selectedGuild,
+        IReadOnlyDictionary<Snowflake, Channel> selectedChannelsById,
+        ICollection<UnresolvedCatalogChannel> unresolved
+    )
+    {
+        var targets = new List<ResolvedContinueTarget>();
+
+        foreach (var entry in entries)
+        {
+            var cutoff = await ContinuationFormat.ReadCutoffAsync(entry.FilePath);
+
+            if (!cutoff.IsChronological)
+            {
+                unresolved.Add(
+                    new UnresolvedCatalogChannel(
+                        entry.ChannelId,
+                        ContinueSkipReason.ReverseChronological
+                    )
+                );
+                continue;
+            }
+
+            if (!selectedChannelsById.TryGetValue(entry.ChannelId, out var channel))
+                continue;
+
+            targets.Add(
+                new ResolvedContinueTarget(
+                    channel,
+                    channel.IsDirect ? Guild.DirectMessages : selectedGuild,
+                    entry.FilePath,
+                    Path.GetDirectoryName(entry.FilePath) ?? string.Empty,
+                    entry.Format,
+                    cutoff
+                )
+            );
+        }
+
+        return targets;
+    }
+
+    private async Task<ResolvedContinueTarget?> ResolvePickedContinueTargetAsync(
         Guild selectedGuild,
         IReadOnlyDictionary<Snowflake, Channel> selectedChannelsById
     )
     {
-        var progress = _progressMuxer.CreateInput();
+        var filePath = await _dialogManager.PromptSingleFilePathAsync(
+            CreateContinueExportFileTypes()
+        );
+        if (string.IsNullOrWhiteSpace(filePath))
+            return null;
+
+        if (!ContinuationFormat.IsSupportedExtension(filePath))
+        {
+            _snackbarManager.Notify(
+                LocalizationManager.ContinueExportFormatUnsupportedMessage.TrimEnd('.')
+            );
+            return null;
+        }
+
+        if (IsPartitionedExportPath(filePath))
+        {
+            _snackbarManager.Notify(
+                LocalizationManager.ContinueExportPartitionedUnsupportedMessage.TrimEnd('.')
+            );
+            return null;
+        }
+
+        var cutoff = await ContinuationFormat.ReadCutoffAsync(filePath);
+        if (!cutoff.IsChronological)
+        {
+            _snackbarManager.Notify(
+                LocalizationManager.ContinueExportReverseUnsupportedMessage.TrimEnd('.')
+            );
+            return null;
+        }
+
+        var channel = selectedChannelsById.TryGetValue(cutoff.ChannelId, out var selectedChannel)
+            ? selectedChannel
+            : await _discord!.GetChannelAsync(cutoff.ChannelId);
+
+        return new ResolvedContinueTarget(
+            channel,
+            channel.IsDirect ? Guild.DirectMessages : selectedGuild,
+            filePath,
+            Path.GetDirectoryName(filePath) ?? string.Empty,
+            ContinuationFormat.FormatFor(filePath),
+            cutoff
+        );
+    }
+
+    private async Task<ContinueExportFileResult> ContinueExportFileAsync(
+        ChannelExporter exporter,
+        ResolvedContinueTarget target,
+        int progressIndex,
+        ICompletableProgress<Percentage> progress,
+        CancellationToken cancellationToken
+    )
+    {
         var tempPath = Path.Combine(
             Path.GetTempPath(),
-            $"{Program.Name}-continue-{Guid.NewGuid():N}{Path.GetExtension(filePath)}"
+            $"{Program.Name}-continue-{Guid.NewGuid():N}{Path.GetExtension(target.FilePath)}"
         );
 
         try
         {
-            var cutoff = await ContinuationFormat.ReadCutoffAsync(filePath);
-
-            if (!cutoff.IsChronological)
-            {
-                _snackbarManager.Notify(
-                    LocalizationManager.ContinueExportReverseUnsupportedMessage.TrimEnd('.')
-                );
-                return ContinueExportFileResult.Skipped;
-            }
-
-            var channel = selectedChannelsById.TryGetValue(
-                cutoff.ChannelId,
-                out var selectedChannel
-            )
-                ? selectedChannel
-                : await _discord!.GetChannelAsync(cutoff.ChannelId);
-            var guild = channel.IsDirect ? Guild.DirectMessages : selectedGuild;
-
-            var request = new ExportRequest(
-                guild,
-                channel,
-                tempPath,
-                null,
-                ContinuationFormat.FormatFor(filePath),
-                cutoff.Cutoff,
-                cutoff.Before,
-                PartitionLimit.Null,
-                MessageFilter.Null,
-                false,
-                _settingsService.LastShouldFormatMarkdown,
-                false,
-                false,
-                _settingsService.Locale,
-                _settingsService.IsUtcNormalizationEnabled
-            );
-
+            var request = BuildContinueExportRequest(target, tempPath);
             ExportResult? appendedResult = null;
 
             try
             {
-                StartExportProgressRun(await EstimateMessageTotalsAsync([request]));
                 appendedResult = await exporter.ExportChannelAsync(
                     request,
-                    CreateExportProgressInput(0, progress)
+                    CreateExportProgressInput(progressIndex, progress),
+                    cancellationToken
                 );
             }
             catch (ChannelEmptyException)
             {
-                if (ContinuationFormat.FormatFor(filePath) is not ExportFormat.Db)
+                if (target.Format is not ExportFormat.Db)
                     return new ContinueExportFileResult(true, 0, true);
             }
 
-            var countBefore = cutoff.ExistingCount;
+            var countBefore = target.Cutoff.ExistingCount;
             var total = await ContinuationFormat.MergeAsync(
-                filePath,
+                target.FilePath,
                 tempPath,
-                cutoff,
-                DateTimeOffset.Now
+                target.Cutoff,
+                DateTimeOffset.Now,
+                cancellationToken
             );
             var newMessages = total - countBefore;
             var isCatalogRefreshed = await RefreshContinuedExportCatalogAsync(
-                filePath,
-                guild,
-                channel,
+                target.FilePath,
+                target.Guild,
+                target.Channel,
                 total,
                 appendedResult
             );
@@ -1465,7 +1512,7 @@ public partial class DashboardViewModel : ViewModelBase
         }
         finally
         {
-            MarkExportProgressCompleted(0);
+            MarkExportProgressCompleted(progressIndex);
             progress.ReportCompletion();
             try
             {
@@ -1478,57 +1525,105 @@ public partial class DashboardViewModel : ViewModelBase
         }
     }
 
-    private static IReadOnlyList<string> ResolveSelectedContinueExportFilePaths(
-        string filePath,
-        Guild guild,
-        IReadOnlyList<Channel> selectedChannels,
-        ContinuationCutoff cutoff
+    private ExportRequest BuildContinueExportRequest(
+        ResolvedContinueTarget target,
+        string outputPath
+    ) =>
+        new(
+            target.Guild,
+            target.Channel,
+            outputPath,
+            null,
+            target.Format,
+            target.Cutoff.Cutoff,
+            target.Cutoff.Before,
+            PartitionLimit.Null,
+            MessageFilter.Null,
+            false,
+            _settingsService.LastShouldFormatMarkdown,
+            false,
+            false,
+            _settingsService.Locale,
+            _settingsService.IsUtcNormalizationEnabled
+        );
+
+    internal async Task<ContinueExportRunSummary> RunContinueLoopAsync(
+        IReadOnlyList<ResolvedContinueTarget> targets,
+        Func<ResolvedContinueTarget, CancellationToken, Task<ContinueExportFileResult>> processOne,
+        CancellationToken cancellationToken
     )
     {
-        if (selectedChannels.Count == 0)
-            return [];
+        var processed = new List<ContinueExportFileResult>();
+        var failedChannels = new List<Channel>();
+        var exportedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var catalogWriteFailed = false;
 
-        var dir = Path.GetDirectoryName(filePath);
-        if (string.IsNullOrEmpty(dir))
-            return selectedChannels.Any(c => c.Id == cutoff.ChannelId) && File.Exists(filePath)
-                ? [filePath]
-                : [];
-
-        var format = ContinuationFormat.FormatFor(filePath);
-        var paths = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var channel in selectedChannels)
+        foreach (var target in targets)
         {
-            var candidatePath =
-                channel.Id == cutoff.ChannelId
-                    ? filePath
-                    : Path.Combine(
-                        dir,
-                        ExportRequest.GetDefaultOutputFileName(
-                            guild,
-                            channel,
-                            format,
-                            before: cutoff.Before
-                        )
-                    );
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (!File.Exists(candidatePath) || !seen.Add(candidatePath))
-                continue;
+            try
+            {
+                var result = await processOne(target, cancellationToken);
+                if (!result.WasProcessed)
+                    continue;
 
-            paths.Add(candidatePath);
+                processed.Add(result);
+                if (!result.IsCatalogRefreshed)
+                    catalogWriteFailed = true;
+
+                exportedDirs.Add(target.Dir);
+            }
+            catch (DiscordChatExporterException ex) when (!ex.IsFatal)
+            {
+                failedChannels.Add(target.Channel);
+                _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+            }
         }
 
-        return paths;
+        RegisterExportedDirs(exportedDirs.ToArray());
+        return new ContinueExportRunSummary(
+            processed.Count,
+            processed.Sum(p => p.NewMessages),
+            catalogWriteFailed,
+            failedChannels
+        );
     }
 
-    private sealed record ContinueExportFileResult(
-        bool WasProcessed,
-        long NewMessages,
-        bool IsCatalogRefreshed
+    internal string FormatContinueSummary(
+        ContinueExportRunSummary summary,
+        int skippedCount
     )
     {
-        public static ContinueExportFileResult Skipped { get; } = new(false, 0, true);
+        var parts = new List<string>();
+
+        if (summary.ProcessedCount > 0)
+        {
+            parts.Add(
+                summary.TotalNewMessages <= 0
+                    ? LocalizationManager.ContinueExportUpToDateMessage
+                    : string.Format(
+                        LocalizationManager.ContinueExportSuccessMessage,
+                        summary.TotalNewMessages
+                    )
+            );
+        }
+
+        if (skippedCount > 0)
+            parts.Add(string.Format(LocalizationManager.ContinueExportSkippedTail, skippedCount));
+
+        if (summary.FailedChannels.Count > 0)
+            parts.Add(
+                string.Format(
+                    LocalizationManager.ContinueExportFailedTail,
+                    summary.FailedChannels.Count
+                )
+            );
+
+        if (summary.CatalogWriteFailed)
+            parts.Add(LocalizationManager.ExportCatalogWriteFailedMessage);
+
+        return string.Join(" ", parts);
     }
 
     private void UpdateEta()

@@ -98,7 +98,8 @@ public partial class LocalizationManager
     public string ContinueExportReverseUnsupportedMessage => Get();
     public string ContinueExportPartitionedUnsupportedMessage => Get();
     public string ContinueExportFormatUnsupportedMessage => Get();
-    public string ContinueExportNoSelectedFilesMessage => Get();
+    public string ContinueExportSkippedTail => Get();
+    public string ContinueExportFailedTail => Get();
     public string SettingsTooltip => Get();
     public string LibraryTooltip => Get();
     public string ConversionTooltip => Get();
