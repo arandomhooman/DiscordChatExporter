@@ -42,6 +42,8 @@ public partial class LocalizationManager
                 "Continuing partitioned exports is not supported.",
             [nameof(ContinueExportFormatUnsupportedMessage)] =
                 "Continuing this file type is not supported (JSON, HTML, CSV, and SQLite are).",
+            [nameof(ContinueExportNoSelectedFilesMessage)] =
+                "No existing exports were found for the selected channel(s) next to the selected file.",
             [nameof(SettingsTooltip)] = "Settings",
             [nameof(LibraryTooltip)] = "Library",
             [nameof(ConversionTooltip)] = "Convert JSON exports",
