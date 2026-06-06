@@ -75,6 +75,7 @@ public partial class LocalizationManager
     public string EtaEstimatingText => Get();
     public string EtaRemainingFormat => Get();
     public string MessagesReadFormat => Get();
+    public string MessagesProgressFormat => Get();
     public string MessageRateFormat => Get();
     public string ExportedThroughFormat => Get();
     public string ChannelProgressFormat => Get();

@@ -163,6 +163,40 @@ public sealed class DashboardProgressTests
     }
 
     [AvaloniaFact]
+    public void Status_text_shows_messages_left_when_total_is_known()
+    {
+        var viewModel = CreateViewModel();
+
+        Invoke(viewModel, "StartExportProgressRun", new long?[] { 100 });
+        Invoke(
+            viewModel,
+            "ApplyExportProgress",
+            0,
+            new ExportProgress(Percentage.FromFraction(0.1), 10, DateTimeOffset.UnixEpoch)
+        );
+
+        // total corrects to 100, read 10 -> 90 left.
+        viewModel.MessagesReadText.Should().Contain("90 left");
+    }
+
+    [AvaloniaFact]
+    public void Status_text_shows_only_read_count_when_total_is_unknown()
+    {
+        var viewModel = CreateViewModel();
+
+        Invoke(viewModel, "StartExportProgressRun", new long?[] { (long?)null });
+        Invoke(
+            viewModel,
+            "ApplyExportProgress",
+            0,
+            new ExportProgress(Percentage.FromFraction(0.5), 5, DateTimeOffset.UnixEpoch)
+        );
+
+        viewModel.MessagesReadText.Should().NotBeNull();
+        viewModel.MessagesReadText.Should().NotContain("left");
+    }
+
+    [AvaloniaFact]
     public async Task Background_completion_updates_bound_properties_on_ui_thread()
     {
         var viewModel = CreateViewModel();

@@ -637,7 +637,7 @@ public partial class DashboardViewModel : ViewModelBase
         if (estimatedTotal is not null)
             UpdateDisplayedProgressFraction(messagesRead, estimatedTotal);
 
-        UpdateProgressStatusText(messagesRead, currentTimestamp);
+        UpdateProgressStatusText(messagesRead, estimatedTotal, currentTimestamp);
         UpdateEta();
     }
 
@@ -674,7 +674,7 @@ public partial class DashboardViewModel : ViewModelBase
         else
             UpdateDisplayedProgressFraction(messagesRead, estimatedTotal);
 
-        UpdateProgressStatusText(messagesRead, null);
+        UpdateProgressStatusText(messagesRead, estimatedTotal, null);
         UpdateEta();
     }
 
@@ -699,15 +699,34 @@ public partial class DashboardViewModel : ViewModelBase
         _lastRateMessagesRead = messagesRead;
     }
 
-    private void UpdateProgressStatusText(long messagesRead, DateTimeOffset? currentTimestamp)
+    private string? FormatMessagesRead(long messagesRead, long? estimatedTotal)
     {
-        MessagesReadText =
-            messagesRead > 0
-                ? string.Format(
-                    LocalizationManager.MessagesReadFormat,
-                    messagesRead.ToString("N0", CultureInfo.CurrentCulture)
-                )
-                : null;
+        if (messagesRead <= 0)
+            return null;
+
+        var read = messagesRead.ToString("N0", CultureInfo.CurrentCulture);
+
+        // Only show "left" when we actually have a total and it hasn't been overrun.
+        if (estimatedTotal is { } total && total >= messagesRead)
+        {
+            return string.Format(
+                LocalizationManager.MessagesProgressFormat,
+                read,
+                total.ToString("N0", CultureInfo.CurrentCulture),
+                (total - messagesRead).ToString("N0", CultureInfo.CurrentCulture)
+            );
+        }
+
+        return string.Format(LocalizationManager.MessagesReadFormat, read);
+    }
+
+    private void UpdateProgressStatusText(
+        long messagesRead,
+        long? estimatedTotal,
+        DateTimeOffset? currentTimestamp
+    )
+    {
+        MessagesReadText = FormatMessagesRead(messagesRead, estimatedTotal);
 
         RateText =
             _messageRate > 0
