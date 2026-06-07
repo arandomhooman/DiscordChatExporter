@@ -218,6 +218,47 @@ public class HtmlExportMergerSpecs
     // producing a duplicate id that aborts the merge. The pinned 2000 must live in the FRESH export
     // (the slice being split/deduped) for this to bite.
     [Fact]
+    public async Task It_does_not_drop_a_new_message_whose_id_is_forged_in_old_body_div_attribute_value()
+    {
+        var existing = await WriteAsync(
+            HtmlSample.ExportDetailed([
+                (
+                    100L,
+                    "<div class=chatlog__sticker title=\"x class=chatlog__message-container data-message-id=200\"></div>",
+                    false
+                ),
+            ])
+        );
+        var fresh = await WriteAsync(
+            HtmlSample.ExportDetailed([(200L, "real new", false)]),
+            "-new"
+        );
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(100),
+            null,
+            true,
+            1,
+            true
+        );
+        try
+        {
+            var total = await HtmlExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            var merged = await File.ReadAllTextAsync(existing);
+            merged.Should().Contain("id=chatlog__message-container-200");
+            total.Should().Be(2);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
     public async Task It_dedupes_a_pinned_message_in_the_overlap_window()
     {
         var existing = await WriteAsync(HtmlSample.Export([1000L, 2000L]));

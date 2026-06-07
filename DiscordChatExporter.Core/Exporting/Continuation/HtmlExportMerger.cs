@@ -178,10 +178,8 @@ public static partial class HtmlExportMerger
 
     private static int FindFirstContainerStart(string group)
     {
-        var tag = HtmlExportInspector.MessageContainerOpenTagRegex().Match(group);
-        if (!tag.Success)
-            return -1;
-        return tag.Index;
+        var tags = HtmlExportInspector.FindMessageContainerTags(group);
+        return tags.Count > 0 ? tags[0].Index : -1;
     }
 
     private static IEnumerable<string> SplitByContainerMarker(string containerRegion)
@@ -204,10 +202,7 @@ public static partial class HtmlExportMerger
     // content that happens to contain class/data-message-id text is ignored.
     private static List<int> ContainerMarkerDivStarts(string text)
     {
-        var starts = new List<int>();
-        foreach (Match match in HtmlExportInspector.MessageContainerOpenTagRegex().Matches(text))
-            starts.Add(match.Index);
-        return starts;
+        return HtmlExportInspector.FindMessageContainerTags(text).Select(tag => tag.Index).ToList();
     }
 
     private static IEnumerable<string> SplitMessageGroups(string slice)

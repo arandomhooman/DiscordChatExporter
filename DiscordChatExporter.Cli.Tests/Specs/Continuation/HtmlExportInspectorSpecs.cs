@@ -87,6 +87,34 @@ public class HtmlExportInspectorSpecs
     }
 
     [Fact]
+    public async Task Inspect_ignores_a_forged_message_id_in_message_body_div_attribute_value()
+    {
+        var path = await WriteAsync(
+            HtmlSample.ExportDetailed(
+                [
+                    (
+                        100L,
+                        "<div class=chatlog__sticker title=\"x class=chatlog__message-container data-message-id=999999\"></div>",
+                        false
+                    ),
+                ],
+                [(200L, "real last", false)]
+            )
+        );
+        try
+        {
+            var cutoff = await HtmlExportInspector.InspectAsync(path);
+
+            cutoff.Cutoff.Value.Should().Be(200UL);
+            cutoff.ExistingCount.Should().Be(2);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Inspect_does_not_crash_on_an_oversized_message_id_in_body_text()
     {
         var path = await WriteAsync(
