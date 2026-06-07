@@ -136,6 +136,41 @@ public class HtmlExportMergerSpecs
         }
     }
 
+    [Fact]
+    public async Task It_does_not_drop_a_new_message_whose_id_is_forged_in_old_body_text()
+    {
+        var existing = await WriteAsync(
+            HtmlSample.ExportDetailed([(100L, "data-message-id=200", false)])
+        );
+        var fresh = await WriteAsync(
+            HtmlSample.ExportDetailed([(200L, "real new", false)]),
+            "-new"
+        );
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(100),
+            null,
+            true,
+            1,
+            true
+        );
+        try
+        {
+            var total = await HtmlExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            var merged = await File.ReadAllTextAsync(existing);
+            HtmlExportInspector.ExtractMessageIdStrings(merged).Should().Contain("200");
+            total.Should().Be(2);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
     // Regression: a pinned message renders multi-token `class="chatlog__message-container
     // chatlog__message-container--pinned"`, which the minifier keeps QUOTED. The container-split
     // marker must be quote-tolerant or the pinned container in the overlap window isn't deduped,

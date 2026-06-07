@@ -46,11 +46,7 @@ public static partial class HtmlExportMerger
         var oldHtml = await File.ReadAllTextAsync(existingFilePath, cancellationToken);
         var newHtml = await File.ReadAllTextAsync(newMessagesFilePath, cancellationToken);
 
-        var oldIds = HtmlExportInspector
-            .MessageIdRegex()
-            .Matches(oldHtml)
-            .Select(m => m.Groups[1].Value)
-            .ToHashSet();
+        var oldIds = HtmlExportInspector.ExtractMessageIdStrings(oldHtml).ToHashSet();
 
         // A malformed fresh export (no chatlog container at all) is a real failure — abort so we
         // never replace the original with a no-op against garbage input. A WELL-FORMED fresh export
@@ -66,7 +62,7 @@ public static partial class HtmlExportMerger
         var spliceAt = FindChatlogCloseBeforePostamble(oldHtml);
         var merged = oldHtml[..spliceAt] + newSlice + oldHtml[spliceAt..];
 
-        var totalCount = HtmlExportInspector.MessageIdRegex().Matches(merged).Count;
+        var totalCount = HtmlExportInspector.ExtractMessageIdStrings(merged).Count;
         merged = RewriteCount(merged, totalCount);
 
         Validate(merged);
@@ -178,11 +174,7 @@ public static partial class HtmlExportMerger
         var kept = new List<string>();
         foreach (var container in SplitByContainerMarker(containerRegion))
         {
-            var ids = HtmlExportInspector
-                .MessageIdRegex()
-                .Matches(container)
-                .Select(m => m.Groups[1].Value)
-                .ToArray();
+            var ids = HtmlExportInspector.ExtractMessageIdStrings(container).ToArray();
             // Drop a container only if every id it carries is already present. (Each container has
             // exactly one data-message-id in practice; the All() is just defensive.)
             if (ids.Length > 0 && ids.All(existingIds.Contains))
@@ -317,14 +309,18 @@ public static partial class HtmlExportMerger
             throw new InvalidExportException(
                 "HTML merge produced an invalid file (postamble count)."
             );
-        var ids = HtmlExportInspector
-            .MessageIdRegex()
-            .Matches(merged)
-            .Select(m => ulong.Parse(m.Groups[1].Value))
-            .ToArray();
-        if (ids.Distinct().Count() != ids.Length)
+        var ids = new List<ulong>();
+        foreach (var idString in HtmlExportInspector.ExtractMessageIdStrings(merged))
+        {
+            if (!ulong.TryParse(idString, out var id))
+                throw new InvalidExportException("HTML merge produced an invalid message id.");
+
+            ids.Add(id);
+        }
+
+        if (ids.Distinct().Count() != ids.Count)
             throw new InvalidExportException("HTML merge produced duplicate message ids.");
-        for (var i = 1; i < ids.Length; i++)
+        for (var i = 1; i < ids.Count; i++)
             if (ids[i] < ids[i - 1])
                 throw new InvalidExportException("HTML merge produced out-of-order message ids.");
 
@@ -339,7 +335,7 @@ public static partial class HtmlExportMerger
                 "HTML merge produced a file with no message count in the postamble."
             );
         var displayed = countMatch.Groups[2].Value;
-        var expected = ((long)ids.Length).ToString("n0");
+        var expected = ((long)ids.Count).ToString("n0");
         if (displayed != expected)
             throw new InvalidExportException(
                 $"HTML merge produced an inconsistent message count (postamble shows '{displayed}', expected '{expected}')."
