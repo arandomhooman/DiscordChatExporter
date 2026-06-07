@@ -12,10 +12,7 @@ public class HtmlExportInspectorSpecs
 {
     private static async Task<string> WriteAsync(string html, string name = "Guild - general")
     {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            $"{name} [222] - {Guid.NewGuid():N}.html"
-        );
+        var path = Path.Combine(Path.GetTempPath(), $"{name} [222] - {Guid.NewGuid():N}.html");
         await File.WriteAllTextAsync(path, html);
         return path;
     }
@@ -32,6 +29,49 @@ public class HtmlExportInspectorSpecs
             info.CutoffIsExact.Should().BeTrue();
             info.ExistingCount.Should().Be(3);
             info.IsChronological.Should().BeTrue();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Inspect_ignores_a_forged_message_id_in_message_body_text()
+    {
+        var path = await WriteAsync(
+            HtmlSample.ExportDetailed(
+                [(100L, "data-message-id=999999", false)],
+                [(200L, "real last", false)]
+            )
+        );
+        try
+        {
+            var cutoff = await HtmlExportInspector.InspectAsync(path);
+
+            cutoff.Cutoff.Value.Should().Be(200UL);
+            cutoff.ExistingCount.Should().Be(2);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Inspect_does_not_crash_on_an_oversized_message_id_in_body_text()
+    {
+        var path = await WriteAsync(
+            HtmlSample.ExportDetailed(
+                [(100L, "data-message-id=99999999999999999999999", false)],
+                [(200L, "real last", false)]
+            )
+        );
+        try
+        {
+            var act = async () => await HtmlExportInspector.InspectAsync(path);
+
+            await act.Should().NotThrowAsync();
         }
         finally
         {

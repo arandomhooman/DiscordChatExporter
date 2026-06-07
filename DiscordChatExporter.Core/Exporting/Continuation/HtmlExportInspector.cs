@@ -14,6 +14,22 @@ public static partial class HtmlExportInspector
     [GeneratedRegex("data-message-id=\"?(\\d+)\"?")]
     internal static partial Regex MessageIdRegex();
 
+    // Returns data-message-id values that appear inside a tag (real attributes), skipping values
+    // in escaped message-body text. Used by the inspector and merger so cutoff/count/dedupe agree.
+    internal static IReadOnlyList<string> ExtractMessageIdStrings(string html)
+    {
+        var result = new List<string>();
+        foreach (Match match in MessageIdRegex().Matches(html))
+        {
+            var lt = html.LastIndexOf('<', match.Index);
+            var gt = html.LastIndexOf('>', match.Index);
+            if (lt > gt)
+                result.Add(match.Groups[1].Value);
+        }
+
+        return result;
+    }
+
     public static async ValueTask<ContinuationCutoff> InspectAsync(
         string filePath,
         CancellationToken cancellationToken = default
@@ -44,9 +60,10 @@ public static partial class HtmlExportInspector
             throw new InvalidExportException($"Could not read '{filePath}'.", ex);
         }
 
-        var ids = MessageIdRegex()
-            .Matches(text)
-            .Select(m => Snowflake.Parse(m.Groups[1].Value))
+        var ids = ExtractMessageIdStrings(text)
+            .Select(s => Snowflake.TryParse(s))
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
             .ToArray();
 
         if (ids.Length == 0)
