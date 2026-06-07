@@ -74,7 +74,9 @@ public static class JsonExportReader
                 "conversionData",
                 out var conversionDataJson
             );
-            var conversionData = hasConversionDataBlock ? ParseConversionData(conversionDataJson) : null;
+            var conversionData = hasConversionDataBlock
+                ? ParseConversionData(conversionDataJson)
+                : null;
             conversionData = MergeConversionData(conversionData, inlineEmojis);
 
             return new ParsedExport(
@@ -495,8 +497,20 @@ public static class JsonExportReader
     private static DateTimeOffset? ParseDateOrNull(JsonElement json, string propertyName) =>
         GetStringOrNull(json, propertyName) is { } text ? ParseDate(text) : null;
 
-    private static Color? ParseColor(string? text) =>
-        string.IsNullOrWhiteSpace(text) ? null : ColorTranslator.FromHtml(text);
+    private static Color? ParseColor(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        try
+        {
+            return ColorTranslator.FromHtml(text);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
+        {
+            return null;
+        }
+    }
 
     private static string GetString(JsonElement json, string propertyName) =>
         GetStringOrNull(json, propertyName) ?? "";

@@ -220,6 +220,71 @@ public sealed class JsonExportReaderSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Reader_treats_a_malformed_embed_color_as_null_instead_of_throwing()
+    {
+        var path = await WriteRawJsonAsync(
+            "bad-embed-color.json",
+            """
+            {
+              "guild": { "id": "1", "name": "Test Guild", "iconUrl": "" },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": "topic"
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "bad color",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [
+                    {
+                      "title": "embed title",
+                      "type": "Rich",
+                      "url": null,
+                      "timestamp": null,
+                      "color": "not-a-color",
+                      "description": "embed body",
+                      "fields": [],
+                      "images": [],
+                      "inlineEmojis": []
+                    }
+                  ],
+                  "stickers": [],
+                  "reactions": [],
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+
+        var parsed = await JsonExportReader.ParseAsync(path);
+
+        parsed.Messages.Single().Embeds.Single().Color.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Reader_prefers_raw_content_and_preserves_flags_bounds_and_attachment_metadata()
     {
         var path = await WriteRawJsonAsync(

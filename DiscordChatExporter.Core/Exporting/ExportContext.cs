@@ -231,8 +231,20 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
         return channel.IsVoice ? ChannelKind.GuildVoiceChat : ChannelKind.GuildTextChat;
     }
 
-    private static Color? ParseColor(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : ColorTranslator.FromHtml(value);
+    private static Color? ParseColor(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        try
+        {
+            return ColorTranslator.FromHtml(value);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
+        {
+            return null;
+        }
+    }
 
     public async ValueTask<string> ResolveAssetUrlAsync(
         string url,
