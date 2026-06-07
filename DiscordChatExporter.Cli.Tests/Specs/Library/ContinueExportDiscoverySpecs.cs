@@ -128,7 +128,11 @@ public sealed class ContinueExportDiscoverySpecs : IDisposable
 
         var result = await ContinueExportDiscovery.ResolveAsync([older, newer], [channelId]);
 
-        result.Resolved.Should().ContainSingle().Which.FilePath.Should().Be(Path.Combine(newer, "new.json"));
+        result
+            .Resolved.Should()
+            .ContainSingle()
+            .Which.FilePath.Should()
+            .Be(Path.Combine(newer, "new.json"));
     }
 
     [Fact]
@@ -153,7 +157,11 @@ public sealed class ContinueExportDiscoverySpecs : IDisposable
 
         var result = await ContinueExportDiscovery.ResolveAsync([older, newer], [channelId]);
 
-        result.Resolved.Should().ContainSingle().Which.FilePath.Should().Be(Path.Combine(older, "old.json"));
+        result
+            .Resolved.Should()
+            .ContainSingle()
+            .Which.FilePath.Should()
+            .Be(Path.Combine(older, "old.json"));
         result.Unresolved.Should().BeEmpty();
     }
 
@@ -173,7 +181,8 @@ public sealed class ContinueExportDiscoverySpecs : IDisposable
         var result = await ContinueExportDiscovery.ResolveAsync([dir], [channelId]);
 
         result.Resolved.Should().BeEmpty();
-        result.Unresolved.Should()
+        result
+            .Unresolved.Should()
             .ContainSingle()
             .Which.Should()
             .Be(new UnresolvedCatalogChannel(channelId, ContinueSkipReason.Partitioned));
@@ -195,7 +204,8 @@ public sealed class ContinueExportDiscoverySpecs : IDisposable
         var result = await ContinueExportDiscovery.ResolveAsync([dir], [selectedChannelId]);
 
         result.Resolved.Should().BeEmpty();
-        result.Unresolved.Should()
+        result
+            .Unresolved.Should()
             .ContainSingle()
             .Which.Should()
             .Be(new UnresolvedCatalogChannel(selectedChannelId, ContinueSkipReason.NoPriorExport));
@@ -217,7 +227,8 @@ public sealed class ContinueExportDiscoverySpecs : IDisposable
         var result = await ContinueExportDiscovery.ResolveAsync([dir], [channelId]);
 
         result.Resolved.Should().BeEmpty();
-        result.Unresolved.Should()
+        result
+            .Unresolved.Should()
             .ContainSingle()
             .Which.Should()
             .Be(new UnresolvedCatalogChannel(channelId, ContinueSkipReason.FileMissing));
@@ -249,16 +260,15 @@ public sealed class ContinueExportDiscoverySpecs : IDisposable
         );
 
         result.Resolved.Should().BeEmpty();
-        result.Unresolved.Should()
-            .BeEquivalentTo(
-                [
-                    new UnresolvedCatalogChannel(
-                        unsupportedChannelId,
-                        ContinueSkipReason.UnsupportedFormat
-                    ),
-                    new UnresolvedCatalogChannel(unknownChannelId, ContinueSkipReason.UnknownFormat),
-                ]
-            );
+        result
+            .Unresolved.Should()
+            .BeEquivalentTo([
+                new UnresolvedCatalogChannel(
+                    unsupportedChannelId,
+                    ContinueSkipReason.UnsupportedFormat
+                ),
+                new UnresolvedCatalogChannel(unknownChannelId, ContinueSkipReason.UnknownFormat),
+            ]);
     }
 
     [Fact]
@@ -281,7 +291,8 @@ public sealed class ContinueExportDiscoverySpecs : IDisposable
 
         result.Resolved.Select(r => r.ChannelId).Should().Equal(resolvedChannelId);
         result.Unresolved.Select(u => u.ChannelId).Should().Equal(unresolvedChannelId);
-        result.Resolved.Select(r => r.ChannelId)
+        result
+            .Resolved.Select(r => r.ChannelId)
             .Should()
             .NotIntersectWith(result.Unresolved.Select(u => u.ChannelId));
     }

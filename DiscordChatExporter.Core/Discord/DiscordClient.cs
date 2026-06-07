@@ -899,11 +899,7 @@ public class DiscordClient(
         // This also snapshots the boundaries, which means that messages posted after
         // the export started will not appear in the output.
         var lastMessage = await TryGetLastMessageAsync(channelId, before, cancellationToken);
-        if (
-            lastMessage is null
-            || after is not null
-                && lastMessage.Id.Value <= after.Value.Value
-        )
+        if (lastMessage is null || after is not null && lastMessage.Id.Value <= after.Value.Value)
             yield break;
 
         // Keep track of the first message in range in order to calculate the progress
@@ -983,8 +979,7 @@ public class DiscordClient(
         var firstMessage = await TryGetFirstMessageAsync(channelId, after, cancellationToken);
         if (
             firstMessage is null
-            || before is not null
-                && firstMessage.Id.Value >= before.Value.Value
+            || before is not null && firstMessage.Id.Value >= before.Value.Value
         )
             yield break;
 

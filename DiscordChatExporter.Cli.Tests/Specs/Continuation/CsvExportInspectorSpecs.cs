@@ -119,12 +119,8 @@ public class CsvExportInspectorSpecs
     [Fact]
     public async Task I_cannot_continue_a_before_bounded_csv_export_without_exact_bound_metadata()
     {
-        var body =
-            "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"first\",\"\",\"\"\r\n";
-        var path = await WriteAsync(
-            Header + body,
-            "Guild - general (2021-07-01 to 2021-07-31)"
-        );
+        var body = "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"first\",\"\",\"\"\r\n";
+        var path = await WriteAsync(Header + body, "Guild - general (2021-07-01 to 2021-07-31)");
         try
         {
             var act = async () => await CsvExportInspector.InspectAsync(path);

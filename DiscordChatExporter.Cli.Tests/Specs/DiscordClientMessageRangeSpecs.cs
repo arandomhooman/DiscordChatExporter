@@ -122,24 +122,24 @@ public sealed class DiscordClientMessageRangeSpecs
 
     private static string MessageJson(Snowflake id, DateTimeOffset timestamp, string content) =>
         $$"""
-        {
-          "id": "{{id}}",
-          "type": 0,
-          "flags": 0,
-          "author": {
-            "id": "10",
-            "username": "alice",
-            "global_name": "Alice",
-            "discriminator": "0",
-            "avatar": null
-          },
-          "timestamp": "{{timestamp:O}}",
-          "content": "{{content}}",
-          "attachments": [],
-          "embeds": [],
-          "mentions": []
-        }
-        """;
+            {
+              "id": "{{id}}",
+              "type": 0,
+              "flags": 0,
+              "author": {
+                "id": "10",
+                "username": "alice",
+                "global_name": "Alice",
+                "discriminator": "0",
+                "avatar": null
+              },
+              "timestamp": "{{timestamp:O}}",
+              "content": "{{content}}",
+              "attachments": [],
+              "embeds": [],
+              "mentions": []
+            }
+            """;
 
     private sealed class QueueHttpMessageHandler(IReadOnlyCollection<HttpResponseMessage> responses)
         : HttpMessageHandler

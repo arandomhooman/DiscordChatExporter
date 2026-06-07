@@ -180,8 +180,9 @@ public sealed partial class ConversionViewModel(
                 bool hasConversionData;
                 try
                 {
-                    hasConversionData = (await JsonExportReader.ParseAsync(sourcePath))
-                        .HasConversionDataBlock;
+                    hasConversionData = (
+                        await JsonExportReader.ParseAsync(sourcePath)
+                    ).HasConversionDataBlock;
                 }
                 catch (Exception ex)
                 {
