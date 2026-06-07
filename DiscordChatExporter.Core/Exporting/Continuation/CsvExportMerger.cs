@@ -19,7 +19,16 @@ public static class CsvExportMerger
         CancellationToken cancellationToken = default
     )
     {
-        var newText = await File.ReadAllTextAsync(newRowsFilePath, cancellationToken);
+        string newText;
+        try
+        {
+            newText = await File.ReadAllTextAsync(newRowsFilePath, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidExportException($"Could not read '{newRowsFilePath}'.", ex);
+        }
+
         var newRows = CsvExportInspector.ParseCsv(newText);
 
         var tempPath = existingFilePath + ".merging.tmp";
@@ -52,7 +61,7 @@ public static class CsvExportMerger
             }
             AtomicFile.ReplaceWithBackupCleanup(tempPath, existingFilePath);
         }
-        catch
+        catch (Exception ex)
         {
             try
             {
@@ -62,6 +71,18 @@ public static class CsvExportMerger
             {
                 // best-effort
             }
+
+            if (ex is OperationCanceledException)
+                throw;
+
+            if (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidExportException(
+                    $"Could not continue the CSV export '{existingFilePath}'.",
+                    ex
+                );
+            }
+
             throw;
         }
         return added;

@@ -24,6 +24,47 @@ public class CsvExportMergerSpecs
     }
 
     [Fact]
+    public async Task Merge_wraps_an_unreadable_new_rows_file_as_InvalidExportException()
+    {
+        var existing = await WriteAsync("AuthorID,Author,Date,Content\r\n");
+        var existingBefore = await File.ReadAllTextAsync(existing);
+        var missingIncoming = Path.Combine(
+            Path.GetTempPath(),
+            $"dce-missing-{Guid.NewGuid():N}.csv"
+        );
+
+        try
+        {
+            var act = async () =>
+                await CsvExportMerger.MergeAsync(
+                    existing,
+                    missingIncoming,
+                    new ContinuationCutoff(
+                        new Snowflake(333),
+                        new Snowflake(0),
+                        null,
+                        true,
+                        0,
+                        false
+                    )
+                );
+
+            await act.Should().ThrowAsync<InvalidExportException>();
+            (await File.ReadAllTextAsync(existing)).Should().Be(existingBefore);
+            File.Exists(existing + ".merging.tmp").Should().BeFalse();
+            File.Exists(existing + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(existing);
+            if (File.Exists(existing + ".merging.tmp"))
+                File.Delete(existing + ".merging.tmp");
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
     public async Task It_appends_new_rows_skipping_the_header_and_boundary_rows()
     {
         var d1 = "2021-07-19T13:34:18.0000000+00:00";
