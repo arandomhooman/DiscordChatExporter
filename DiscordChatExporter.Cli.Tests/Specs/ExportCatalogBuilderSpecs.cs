@@ -55,7 +55,7 @@ public class ExportCatalogBuilderSpecs : IDisposable
             "2",
             channelName,
             null,
-            filePath,
+            Path.GetFileName(filePath),
             "json",
             5,
             null,
@@ -86,20 +86,66 @@ public class ExportCatalogBuilderSpecs : IDisposable
     [Fact]
     public async Task Dedupes_entries_by_file_path()
     {
-        // Two DIFFERENT directories whose manifests reference the SAME File path. This exercises
-        // the by-file dictionary dedup, not just the directory-level Distinct.
-        var sharedFile = Path.Combine(_root, "shared", "x.json");
-        var d1 = await WriteManifestEntryAsync(
-            "one",
-            "alpha",
-            sharedFile,
-            DateTimeOffset.UnixEpoch
+        // A hostile/hand-edited manifest can still contain duplicate bare filenames. This exercises
+        // the catalog builder's by-file dictionary dedup without weakening the bare-filename
+        // invariant by using rooted paths.
+        var dir = Path.Combine(_root, "dupes");
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(
+            Path.Combine(dir, ExportManifest.FileName),
+            /* lang=json */
+            """
+            {
+              "schemaVersion": 1,
+              "generatedAt": "2026-01-01T00:00:00+00:00",
+              "entries": [
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "1",
+                  "channelName": "alpha",
+                  "categoryName": null,
+                  "file": "x.json",
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
+                },
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "2",
+                  "channelName": "beta",
+                  "categoryName": null,
+                  "file": "x.json",
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
+                }
+              ]
+            }
+            """
         );
-        var d2 = await WriteManifestEntryAsync("two", "beta", sharedFile, DateTimeOffset.UnixEpoch);
 
-        var catalog = await ExportCatalogBuilder.BuildFromDirectoriesAsync([d1, d2]);
+        var catalog = await ExportCatalogBuilder.BuildFromDirectoriesAsync([dir]);
 
         catalog.Should().ContainSingle();
+        catalog.Single().File.Should().Be(Path.Combine(dir, "x.json"));
     }
 
     [Fact]
@@ -134,6 +180,130 @@ public class ExportCatalogBuilderSpecs : IDisposable
         var catalog = await ExportCatalogBuilder.BuildFromDirectoriesAsync([d1, empty, missing]);
 
         catalog.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Build_skips_entries_whose_file_escapes_the_export_directory()
+    {
+        var dir = Path.Combine(_root, "escape");
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(
+            Path.Combine(dir, ExportManifest.FileName),
+            /* lang=json */
+            """
+            {
+              "schemaVersion": 1,
+              "generatedAt": "2026-01-01T00:00:00+00:00",
+              "entries": [
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "1",
+                  "channelName": "safe",
+                  "categoryName": null,
+                  "file": "chat [1].json",
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
+                },
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "2",
+                  "channelName": "escape",
+                  "categoryName": null,
+                  "file": "..\\..\\evil.json",
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
+                }
+              ]
+            }
+            """
+        );
+
+        var catalog = await ExportCatalogBuilder.BuildFromDirectoriesAsync([dir]);
+
+        catalog.Should().ContainSingle();
+        catalog.Single().File.Should().Be(Path.Combine(dir, "chat [1].json"));
+        catalog.Should().NotContain(e => e.File.Contains("evil.json"));
+    }
+
+    [Fact]
+    public async Task Build_skips_entries_with_a_null_or_empty_file()
+    {
+        var dir = Path.Combine(_root, "null-file");
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(
+            Path.Combine(dir, ExportManifest.FileName),
+            /* lang=json */
+            """
+            {
+              "schemaVersion": 1,
+              "generatedAt": "2026-01-01T00:00:00+00:00",
+              "entries": [
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "3",
+                  "channelName": "null",
+                  "categoryName": null,
+                  "file": null,
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
+                },
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "4",
+                  "channelName": "empty",
+                  "categoryName": null,
+                  "file": "",
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
+                }
+              ]
+            }
+            """
+        );
+
+        var act = async () => await ExportCatalogBuilder.BuildFromDirectoriesAsync([dir]);
+
+        (await act.Should().NotThrowAsync()).Which.Should().BeEmpty();
     }
 
     [Fact]
