@@ -33,7 +33,7 @@ public sealed class ExportContextAssetSpecs : IDisposable
         }
     }
 
-    private ExportContext CreateHtmlContext(bool shouldDownloadAssets)
+    private ExportContext CreateHtmlContext(bool shouldDownloadAssets, string? assetsDirPath = null)
     {
         var guild = new Guild(new Snowflake(1), "Test Guild", "");
         var channel = new Channel(
@@ -53,7 +53,7 @@ public sealed class ExportContextAssetSpecs : IDisposable
             guild,
             channel,
             outputPath,
-            null,
+            assetsDirPath,
             ExportFormat.HtmlDark,
             null,
             null,
@@ -83,6 +83,19 @@ public sealed class ExportContextAssetSpecs : IDisposable
             );
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task Resolve_asset_url_falls_back_to_remote_url_on_local_io_failure()
+    {
+        var blockedAssetsPath = Path.Combine(_dir, "assets-as-file");
+        await File.WriteAllTextAsync(blockedAssetsPath, "not a directory");
+        var context = CreateHtmlContext(shouldDownloadAssets: true, blockedAssetsPath);
+        var url = "https://example.com/avatar.png";
+
+        var result = await context.ResolveAssetUrlAsync(url);
+
+        result.Should().Be(url);
     }
 
     [Fact]
