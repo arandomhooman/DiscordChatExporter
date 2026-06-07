@@ -159,7 +159,44 @@ public class HtmlExportMergerSpecs
             var total = await HtmlExportMerger.MergeAsync(existing, fresh, cutoff);
 
             var merged = await File.ReadAllTextAsync(existing);
-            HtmlExportInspector.ExtractMessageIdStrings(merged).Should().Contain("200");
+            merged.Should().Contain("id=chatlog__message-container-200");
+            total.Should().Be(2);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
+    public async Task It_does_not_drop_a_new_message_whose_id_is_forged_in_old_body_link_attribute()
+    {
+        var existing = await WriteAsync(
+            HtmlSample.ExportDetailed([
+                (100L, "<a href=\"https://example.test/?data-message-id=200\">link</a>", false),
+            ])
+        );
+        var fresh = await WriteAsync(
+            HtmlSample.ExportDetailed([(200L, "real new", false)]),
+            "-new"
+        );
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(100),
+            null,
+            true,
+            1,
+            true
+        );
+        try
+        {
+            var total = await HtmlExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            var merged = await File.ReadAllTextAsync(existing);
+            merged.Should().Contain("id=chatlog__message-container-200");
             total.Should().Be(2);
         }
         finally

@@ -59,6 +59,34 @@ public class HtmlExportInspectorSpecs
     }
 
     [Fact]
+    public async Task Inspect_ignores_a_forged_message_id_in_message_body_link_attribute()
+    {
+        var path = await WriteAsync(
+            HtmlSample.ExportDetailed(
+                [
+                    (
+                        100L,
+                        "<a href=\"https://example.test/?data-message-id=999999\">link</a>",
+                        false
+                    ),
+                ],
+                [(200L, "real last", false)]
+            )
+        );
+        try
+        {
+            var cutoff = await HtmlExportInspector.InspectAsync(path);
+
+            cutoff.Cutoff.Value.Should().Be(200UL);
+            cutoff.ExistingCount.Should().Be(2);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Inspect_does_not_crash_on_an_oversized_message_id_in_body_text()
     {
         var path = await WriteAsync(
