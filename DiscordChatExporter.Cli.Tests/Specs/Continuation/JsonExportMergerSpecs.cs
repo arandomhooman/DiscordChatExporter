@@ -53,6 +53,36 @@ public class JsonExportMergerSpecs
     }
 
     [Fact]
+    public async Task Merge_wraps_corrupt_new_messages_json_as_InvalidExportException()
+    {
+        var existing = await WriteAsync(
+            """{"guild":{},"channel":{},"messages":[],"messageCount":0}"""
+        );
+        var existingBefore = await File.ReadAllTextAsync(existing);
+        var incoming = await WriteAsync("{ this is not valid json");
+
+        try
+        {
+            var act = async () =>
+                await JsonExportMerger.MergeAsync(existing, incoming, DateTimeOffset.UnixEpoch);
+
+            await act.Should().ThrowAsync<InvalidExportException>();
+            (await File.ReadAllTextAsync(existing)).Should().Be(existingBefore);
+            File.Exists(existing + ".merging.tmp").Should().BeFalse();
+            File.Exists(existing + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(incoming);
+            if (File.Exists(existing + ".merging.tmp"))
+                File.Delete(existing + ".merging.tmp");
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
     public async Task It_appends_new_messages_and_fixes_the_count()
     {
         var existing = await WriteAsync(Existing($"{MsgA},{MsgB}", 2));

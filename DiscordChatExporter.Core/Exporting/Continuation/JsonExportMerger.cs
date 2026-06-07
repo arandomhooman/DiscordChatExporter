@@ -23,14 +23,14 @@ public static class JsonExportMerger
         CancellationToken cancellationToken = default
     )
     {
-        var existingBytes = await File.ReadAllBytesAsync(existingFilePath, cancellationToken);
-        var newBytes = await File.ReadAllBytesAsync(newMessagesFilePath, cancellationToken);
-
         var tempPath = existingFilePath + ".merging.tmp";
         long total;
 
         try
         {
+            var existingBytes = await File.ReadAllBytesAsync(existingFilePath, cancellationToken);
+            var newBytes = await File.ReadAllBytesAsync(newMessagesFilePath, cancellationToken);
+
             await using (var outStream = File.Create(tempPath))
             {
                 await using var writer = new Utf8JsonWriter(
@@ -49,7 +49,7 @@ public static class JsonExportMerger
 
             AtomicFile.ReplaceWithBackupCleanup(tempPath, existingFilePath);
         }
-        catch
+        catch (Exception ex)
         {
             try
             {
@@ -58,6 +58,19 @@ public static class JsonExportMerger
             catch
             { /* best-effort temp cleanup */
             }
+
+            if (ex is OperationCanceledException)
+                throw;
+
+            if (ex is JsonException or IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidExportException(
+                    $"Could not continue the JSON export '{existingFilePath}'. "
+                        + "The file may be locked or not a valid DiscordChatExporter JSON export.",
+                    ex
+                );
+            }
+
             throw;
         }
 
