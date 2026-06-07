@@ -30,12 +30,12 @@ public static class ExportCatalogBuilder
 
             // ManifestEntry.File must be a bare filename relative to the manifest's directory
             // (ManifestBuilder sets it via Path.GetFileName). Enforce that on read: anything
-            // with a directory component, a rooted path, or ".." is rejected. Otherwise,
+            // with a directory component, a rooted path, ".", or ".." is rejected. Otherwise,
             // Path.Combine can resolve the manifest entry outside this export folder, reaching
             // read sinks and, on Continue, atomic-overwrite write sinks.
             foreach (var entry in manifest.Entries)
             {
-                if (string.IsNullOrEmpty(entry.File) || entry.File != Path.GetFileName(entry.File))
+                if (!IsBareExportFileName(entry.File))
                     continue;
 
                 var absoluteFile = Path.Combine(dir, entry.File);
@@ -45,6 +45,11 @@ public static class ExportCatalogBuilder
 
         return byFile.Values.OrderByDescending(e => e.ExportedAt).ToArray();
     }
+
+    private static bool IsBareExportFileName(string? fileName) =>
+        !string.IsNullOrEmpty(fileName)
+        && fileName is not "." and not ".."
+        && fileName == Path.GetFileName(fileName);
 
     // Returns the directories under rootDir (inclusive) that contain a manifest.json.
     public static async ValueTask<IReadOnlyList<string>> ScanForExportDirsAsync(

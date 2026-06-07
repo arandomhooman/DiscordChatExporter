@@ -232,6 +232,44 @@ public class ExportCatalogBuilderSpecs : IDisposable
                   "sha256": "",
                   "partitioned": false,
                   "exportedAt": "2026-01-01T00:00:00+00:00"
+                },
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "3",
+                  "channelName": "dot",
+                  "categoryName": null,
+                  "file": ".",
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
+                },
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "4",
+                  "channelName": "dotdot",
+                  "categoryName": null,
+                  "file": "..",
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
                 }
               ]
             }
