@@ -289,6 +289,30 @@ public class SqliteContinuationSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Merger_wraps_a_corrupt_existing_database_as_InvalidExportException()
+    {
+        var existing = Path.Combine(_dir, "chat [111].db");
+        await File.WriteAllTextAsync(existing, "this is not a sqlite database");
+        var existingBefore = await File.ReadAllBytesAsync(existing);
+
+        var incoming = Path.Combine(_dir, "incoming.db");
+        await File.WriteAllTextAsync(incoming, "also not a database");
+
+        var act = async () =>
+            await SqliteExportMerger.MergeAsync(
+                existing,
+                incoming,
+                new ContinuationCutoff(new Snowflake(111), new Snowflake(0), null, true, 0, true),
+                DateTimeOffset.UnixEpoch
+            );
+
+        await act.Should().ThrowAsync<InvalidExportException>();
+        (await File.ReadAllBytesAsync(existing)).Should().Equal(existingBefore);
+        File.Exists(existing + ".merging.tmp").Should().BeFalse();
+        File.Exists(existing + ".bak").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Merger_appends_new_messages_and_updates_count_and_fts()
     {
         var existing = await WriteDbAsync(
