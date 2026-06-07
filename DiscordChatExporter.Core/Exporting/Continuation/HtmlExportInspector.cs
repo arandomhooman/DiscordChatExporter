@@ -14,8 +14,10 @@ public static partial class HtmlExportInspector
     [GeneratedRegex("data-message-id=\"?(\\d+)\"?")]
     internal static partial Regex MessageIdRegex();
 
-    [GeneratedRegex("class=\"?chatlog__message-container")]
-    private static partial Regex MessageContainerClassRegex();
+    [GeneratedRegex(
+        "<div\\b(?=[^>]*\\sclass=(?:\"[^\"]*\\bchatlog__message-container\\b[^\"]*\"|chatlog__message-container\\b))[^>]*>"
+    )]
+    internal static partial Regex MessageContainerOpenTagRegex();
 
     // Returns data-message-id values from real message-container tags only. This skips forged ids in
     // message-body text and in user-controlled attributes rendered inside message bodies, such as
@@ -23,20 +25,11 @@ public static partial class HtmlExportInspector
     internal static IReadOnlyList<string> ExtractMessageIdStrings(string html)
     {
         var result = new List<string>();
-        foreach (Match match in MessageIdRegex().Matches(html))
+        foreach (Match tagMatch in MessageContainerOpenTagRegex().Matches(html))
         {
-            var tagStart = html.LastIndexOf('<', match.Index);
-            var previousTagEnd = html.LastIndexOf('>', match.Index);
-            if (tagStart <= previousTagEnd)
-                continue;
-
-            var tagEnd = html.IndexOf('>', match.Index);
-            if (tagEnd < 0)
-                continue;
-
-            var tag = html[tagStart..(tagEnd + 1)];
-            if (MessageContainerClassRegex().IsMatch(tag))
-                result.Add(match.Groups[1].Value);
+            var idMatch = MessageIdRegex().Match(tagMatch.Value);
+            if (idMatch.Success)
+                result.Add(idMatch.Groups[1].Value);
         }
 
         return result;

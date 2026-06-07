@@ -176,7 +176,11 @@ public class HtmlExportMergerSpecs
     {
         var existing = await WriteAsync(
             HtmlSample.ExportDetailed([
-                (100L, "<a href=\"https://example.test/?data-message-id=200\">link</a>", false),
+                (
+                    100L,
+                    "<a href=\"https://example.test/?class=chatlog__message-container&data-message-id=200\">link</a>",
+                    false
+                ),
             ])
         );
         var fresh = await WriteAsync(

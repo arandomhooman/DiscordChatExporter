@@ -26,15 +26,6 @@ public static partial class HtmlExportMerger
     [GeneratedRegex("(Exported )(.+?)( message\\(s\\))")]
     private static partial Regex CountRegex();
 
-    // Matches the opening of a message container's class attribute, tolerating both the unquoted
-    // single-token normal case (class=chatlog__message-container) and the QUOTED multi-token pinned
-    // case (class="chatlog__message-container chatlog__message-container--pinned" — multi-token
-    // values keep their quotes through the minifier). The literal "class=" prefix means it never
-    // false-matches id="chatlog__message-container-N" or href="#chatlog__message-container-N", and
-    // the "--pinned" token (not preceded by class=) yields no second match within a container.
-    [GeneratedRegex("class=\"?chatlog__message-container")]
-    private static partial Regex ContainerMarkerRegex();
-
     public static async ValueTask<long> MergeAsync(
         string existingFilePath,
         string newMessagesFilePath,
@@ -139,9 +130,8 @@ public static partial class HtmlExportMerger
 
     // A group is "<div ...class=chatlog__message-group...>" + one or more message containers +
     // the group-closing "</div>". We keep the group prefix and the closing </div> intact, and
-    // filter the containers in between. Splitting is done by the quote-agnostic
-    // "class=chatlog__message-container" marker (single-token class minifies unquoted, same as
-    // postamble), backing up to the owning "<div".
+    // filter the containers in between. Splitting is done by the quote-agnostic real container-tag
+    // matcher shared with the inspector, so user-rendered links or body text cannot forge a split.
     private static string DedupeContainersInGroup(
         string group,
         HashSet<string> existingIds,
@@ -188,11 +178,10 @@ public static partial class HtmlExportMerger
 
     private static int FindFirstContainerStart(string group)
     {
-        var marker = ContainerMarkerRegex().Match(group);
-        if (!marker.Success)
+        var tag = HtmlExportInspector.MessageContainerOpenTagRegex().Match(group);
+        if (!tag.Success)
             return -1;
-        var divStart = group.LastIndexOf("<div", marker.Index, StringComparison.Ordinal);
-        return divStart;
+        return tag.Index;
     }
 
     private static IEnumerable<string> SplitByContainerMarker(string containerRegion)
@@ -211,17 +200,13 @@ public static partial class HtmlExportMerger
         }
     }
 
-    // Quote-tolerant container-start locator (see ContainerMarkerRegex). For each class-attr match,
-    // back up to the owning "<div".
+    // Quote-tolerant container-start locator. Only real message-container opening tags count; body
+    // content that happens to contain class/data-message-id text is ignored.
     private static List<int> ContainerMarkerDivStarts(string text)
     {
         var starts = new List<int>();
-        foreach (Match m in ContainerMarkerRegex().Matches(text))
-        {
-            var divStart = text.LastIndexOf("<div", m.Index, StringComparison.Ordinal);
-            if (divStart >= 0)
-                starts.Add(divStart);
-        }
+        foreach (Match match in HtmlExportInspector.MessageContainerOpenTagRegex().Matches(text))
+            starts.Add(match.Index);
         return starts;
     }
 
