@@ -267,11 +267,14 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
 
             return optimalFilePath;
         }
-        // Try to catch only exceptions related to failed HTTP requests
+        // Try to catch only exceptions related to failed HTTP requests or local asset IO failures
         // https://github.com/Tyrrrz/DiscordChatExporter/issues/332
         // https://github.com/Tyrrrz/DiscordChatExporter/issues/372
         catch (Exception ex)
             when (ex is HttpRequestException
+                || ex is IOException
+                || ex is UnauthorizedAccessException
+                || ex is PathTooLongException
                 || ex is OperationCanceledException && !cancellationToken.IsCancellationRequested
             )
         {
@@ -282,6 +285,5 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
     }
 
     private static bool IsDownloadableAssetUrl(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri)
-        && uri.Scheme is "http" or "https";
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 }
