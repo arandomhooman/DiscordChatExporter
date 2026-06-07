@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,11 +22,25 @@ public static class ManifestReader
         try
         {
             await using var stream = File.OpenRead(filePath);
-            return await JsonSerializer.DeserializeAsync(
+            var manifest = await JsonSerializer.DeserializeAsync(
                 stream,
                 ManifestJsonContext.Default.ExportManifest,
                 cancellationToken
             );
+
+            if (manifest is null)
+                return null;
+
+            // STJ source-gen doesn't enforce non-null refs: a valid-but-incomplete manifest can
+            // carry a null Entries collection or null elements. Normalize here so every consumer
+            // can rely on non-null Entries with non-null elements.
+            var entries = (manifest.Entries ?? []).Where(e => e is not null).ToArray();
+            return manifest.Entries is not null && entries.Length == manifest.Entries.Count
+                ? manifest
+                : manifest with
+                {
+                    Entries = entries,
+                };
         }
         catch (Exception ex)
             when (ex

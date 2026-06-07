@@ -85,4 +85,79 @@ public class ManifestReaderSpecs
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task Read_normalizes_a_null_entries_collection_to_empty()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"dce-manifest-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(
+            path,
+            /* lang=json */
+            """
+            {
+              "schemaVersion": 1,
+              "generatedAt": "2026-01-01T00:00:00+00:00",
+              "entries": null
+            }
+            """
+        );
+
+        try
+        {
+            var manifest = await ManifestReader.TryReadAsync(path);
+
+            manifest.Should().NotBeNull();
+            manifest!.Entries.Should().NotBeNull().And.BeEmpty();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Read_drops_null_entry_elements()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"dce-manifest-{Guid.NewGuid():N}.json");
+        var json = """
+            {
+              "schemaVersion": 1,
+              "generatedAt": "2026-01-01T00:00:00+00:00",
+              "entries": [
+                null,
+                {
+                  "guildId": "1",
+                  "guildName": "Guild",
+                  "channelId": "5",
+                  "channelName": "general",
+                  "categoryName": null,
+                  "file": "chat [5].json",
+                  "format": "Json",
+                  "messageCount": 0,
+                  "firstMessageId": null,
+                  "firstMessageTimestamp": null,
+                  "lastMessageId": null,
+                  "lastMessageTimestamp": null,
+                  "assetCount": 0,
+                  "fileSizeBytes": 0,
+                  "sha256": "",
+                  "partitioned": false,
+                  "exportedAt": "2026-01-01T00:00:00+00:00"
+                }
+              ]
+            }
+            """;
+        await File.WriteAllTextAsync(path, json);
+
+        try
+        {
+            var manifest = await ManifestReader.TryReadAsync(path);
+
+            manifest!.Entries.Should().ContainSingle().Which.File.Should().Be("chat [5].json");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
