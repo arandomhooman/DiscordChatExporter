@@ -33,6 +33,18 @@ public static class ManifestWriter
         var byFile = new Dictionary<string, ManifestEntry>(StringComparer.OrdinalIgnoreCase);
 
         var existing = await ManifestReader.TryReadAsync(manifestPath, cancellationToken);
+        // "null" means either absent (safe to start fresh) or present-but-unreadable
+        // (locked/corrupt). Overwriting the latter would silently discard every other channel's
+        // entry, so refuse and leave the bytes untouched.
+        if (existing is null && File.Exists(manifestPath))
+        {
+            throw new IOException(
+                $"The manifest '{manifestPath}' exists but could not be read, so it will not be overwritten "
+                    + "(that would lose other channels' entries). Close any app locking it, or remove "
+                    + "the corrupted manifest, then retry."
+            );
+        }
+
         if (existing is not null)
         {
             foreach (var entry in existing.Entries)

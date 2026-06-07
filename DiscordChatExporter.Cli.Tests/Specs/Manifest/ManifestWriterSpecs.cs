@@ -54,6 +54,21 @@ public class ManifestWriterSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Write_does_not_overwrite_a_present_but_unreadable_manifest()
+    {
+        var path = Path.Combine(_dir, ExportManifest.FileName);
+        const string garbage = "{ this is not a valid manifest";
+        await File.WriteAllTextAsync(path, garbage);
+
+        var act = async () =>
+            await ManifestWriter.WriteAsync(_dir, [Entry("new.json", 1)], DateTimeOffset.UnixEpoch);
+
+        await act.Should().ThrowAsync<IOException>();
+        (await File.ReadAllTextAsync(path)).Should().Be(garbage);
+        File.Exists(path + ".tmp").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Writing_again_replaces_entries_for_the_same_file_and_keeps_the_others()
     {
         await ManifestWriter.WriteAsync(
