@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -11,9 +12,25 @@ namespace DiscordChatExporter.Core.Exporting.Continuation;
 public static partial class HtmlExportInspector
 {
     private const string MessageContainerClass = "chatlog__message-container";
+    private const string MessageGroupClass = "chatlog__message-group";
+    private const string ChatlogClass = "chatlog";
     private const string MessageIdAttribute = "data-message-id";
 
     internal readonly record struct MessageContainerTag(int Index, string MessageId);
+
+    private readonly record struct DivOpenTag(
+        int Index,
+        int EndIndex,
+        string ClassValue,
+        string MessageId
+    );
+
+    private readonly record struct DivToken(
+        bool IsOpen,
+        int Index,
+        int EndIndex,
+        DivOpenTag OpenTag
+    );
 
     // Returns data-message-id values from real message-container tags only. This skips forged ids in
     // message-body text and in user-controlled attributes rendered inside message bodies, such as
@@ -23,34 +40,172 @@ public static partial class HtmlExportInspector
 
     internal static IReadOnlyList<MessageContainerTag> FindMessageContainerTags(string html)
     {
-        var tags = new List<MessageContainerTag>();
-        for (var searchIndex = 0; searchIndex < html.Length; )
-        {
-            var tagStart = html.IndexOf("<div", searchIndex, StringComparison.OrdinalIgnoreCase);
-            if (tagStart < 0)
-                break;
+        var chatlog = FindFirstDivWithClass(html, ChatlogClass);
+        if (chatlog is not null)
+            return FindGroupedMessageContainerTags(html, chatlog.Value.EndIndex + 1, true);
 
-            var tagNameEnd = tagStart + 4;
-            if (tagNameEnd < html.Length && !IsTagNameBoundary(html[tagNameEnd]))
+        var groupedTags = FindGroupedMessageContainerTags(html, 0, false);
+        return groupedTags.Count > 0 ? groupedTags : FindTopLevelMessageContainerTags(html);
+    }
+
+    internal static IReadOnlyList<int> FindTopLevelMessageGroupStarts(string html) =>
+        FindTopLevelDivStartsByClass(html, MessageGroupClass);
+
+    private static bool IsTagNameBoundary(char c) => char.IsWhiteSpace(c) || c is '>' or '/';
+
+    private static DivOpenTag? FindFirstDivWithClass(string html, string className)
+    {
+        for (
+            var index = 0;
+            TryFindNextDivOpenTag(html, index, out var tag);
+            index = tag.EndIndex + 1
+        )
+        {
+            if (HasClassToken(tag.ClassValue, className))
+                return tag;
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<MessageContainerTag> FindGroupedMessageContainerTags(
+        string html,
+        int startIndex,
+        bool stopAtDepthZeroClose
+    )
+    {
+        var tags = new List<MessageContainerTag>();
+        var depth = 0;
+        var groupDepth = -1;
+
+        for (
+            var index = startIndex;
+            TryFindNextDivToken(html, index, out var token);
+            index = token.EndIndex + 1
+        )
+        {
+            if (!token.IsOpen)
             {
-                searchIndex = tagNameEnd;
+                if (depth == 0)
+                {
+                    if (stopAtDepthZeroClose)
+                        break;
+                    continue;
+                }
+
+                if (depth == groupDepth)
+                    groupDepth = -1;
+                depth--;
                 continue;
             }
 
-            var tagEnd = FindTagEnd(html, tagNameEnd);
-            if (tagEnd < 0)
-                break;
+            var tag = token.OpenTag;
+            if (groupDepth < 0 && depth == 0 && HasClassToken(tag.ClassValue, MessageGroupClass))
+                groupDepth = 1;
+            else if (groupDepth >= 0 && depth == groupDepth && IsMessageContainer(tag))
+                tags.Add(new MessageContainerTag(tag.Index, tag.MessageId));
 
-            if (TryReadMessageContainerId(html, tagNameEnd, tagEnd, out var messageId))
-                tags.Add(new MessageContainerTag(tagStart, messageId));
-
-            searchIndex = tagEnd + 1;
+            depth++;
         }
 
         return tags;
     }
 
-    private static bool IsTagNameBoundary(char c) => char.IsWhiteSpace(c) || c is '>' or '/';
+    private static IReadOnlyList<MessageContainerTag> FindTopLevelMessageContainerTags(string html)
+    {
+        var tags = new List<MessageContainerTag>();
+        var depth = 0;
+        for (
+            var index = 0;
+            TryFindNextDivToken(html, index, out var token);
+            index = token.EndIndex + 1
+        )
+        {
+            if (!token.IsOpen)
+            {
+                if (depth > 0)
+                    depth--;
+                continue;
+            }
+
+            if (depth == 0 && IsMessageContainer(token.OpenTag))
+                tags.Add(new MessageContainerTag(token.OpenTag.Index, token.OpenTag.MessageId));
+
+            depth++;
+        }
+
+        return tags;
+    }
+
+    private static IReadOnlyList<int> FindTopLevelDivStartsByClass(string html, string className)
+    {
+        var starts = new List<int>();
+        var depth = 0;
+        for (
+            var index = 0;
+            TryFindNextDivToken(html, index, out var token);
+            index = token.EndIndex + 1
+        )
+        {
+            if (!token.IsOpen)
+            {
+                if (depth > 0)
+                    depth--;
+                continue;
+            }
+
+            if (depth == 0 && HasClassToken(token.OpenTag.ClassValue, className))
+                starts.Add(token.OpenTag.Index);
+
+            depth++;
+        }
+
+        return starts;
+    }
+
+    private static bool TryFindNextDivToken(string html, int startIndex, out DivToken token)
+    {
+        var hasOpen = TryFindNextDivOpenTag(html, startIndex, out var openTag);
+        var closeIndex = html.IndexOf("</div>", startIndex, StringComparison.OrdinalIgnoreCase);
+        if (closeIndex >= 0 && (!hasOpen || closeIndex < openTag.Index))
+        {
+            token = new DivToken(false, closeIndex, closeIndex + "</div>".Length - 1, default);
+            return true;
+        }
+
+        if (hasOpen)
+        {
+            token = new DivToken(true, openTag.Index, openTag.EndIndex, openTag);
+            return true;
+        }
+
+        token = default;
+        return false;
+    }
+
+    private static bool TryFindNextDivOpenTag(string html, int startIndex, out DivOpenTag tag)
+    {
+        for (
+            var tagStart = html.IndexOf("<div", startIndex, StringComparison.OrdinalIgnoreCase);
+            tagStart >= 0;
+            tagStart = html.IndexOf("<div", tagStart + 4, StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            var tagNameEnd = tagStart + 4;
+            if (tagNameEnd < html.Length && !IsTagNameBoundary(html[tagNameEnd]))
+                continue;
+
+            var tagEnd = FindTagEnd(html, tagNameEnd);
+            if (tagEnd < 0)
+                break;
+
+            tag = ReadDivOpenTag(html, tagStart, tagNameEnd, tagEnd);
+            return true;
+        }
+
+        tag = default;
+        return false;
+    }
 
     private static int FindTagEnd(string html, int startIndex)
     {
@@ -78,15 +233,10 @@ public static partial class HtmlExportInspector
         return -1;
     }
 
-    private static bool TryReadMessageContainerId(
-        string html,
-        int startIndex,
-        int tagEnd,
-        out string messageId
-    )
+    private static DivOpenTag ReadDivOpenTag(string html, int tagStart, int startIndex, int tagEnd)
     {
         var classValue = string.Empty;
-        messageId = string.Empty;
+        var messageId = string.Empty;
 
         for (var i = startIndex; i < tagEnd; )
         {
@@ -142,8 +292,11 @@ public static partial class HtmlExportInspector
                 messageId = value;
         }
 
-        return messageId.Length > 0 && HasClassToken(classValue, MessageContainerClass);
+        return new DivOpenTag(tagStart, tagEnd, classValue, messageId);
     }
+
+    private static bool IsMessageContainer(DivOpenTag tag) =>
+        tag.MessageId.Length > 0 && HasClassToken(tag.ClassValue, MessageContainerClass);
 
     private static bool IsAttributeNameChar(char c) =>
         !char.IsWhiteSpace(c) && c is not '=' and not '>' and not '/';
@@ -204,7 +357,7 @@ public static partial class HtmlExportInspector
         }
 
         var ids = ExtractMessageIdStrings(text)
-            .Select(s => Snowflake.TryParse(s))
+            .Select(TryParseMessageId)
             .Where(id => id is not null)
             .Select(id => id!.Value)
             .ToArray();
@@ -227,6 +380,11 @@ public static partial class HtmlExportInspector
             CutoffIsExact: true
         );
     }
+
+    private static Snowflake? TryParseMessageId(string value) =>
+        ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+            ? new Snowflake(id)
+            : null;
 
     private static void EnsureConsistentMessageOrder(IReadOnlyList<Snowflake> ids)
     {

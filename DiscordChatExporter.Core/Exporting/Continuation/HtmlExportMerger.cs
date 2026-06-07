@@ -207,8 +207,7 @@ public static partial class HtmlExportMerger
 
     private static IEnumerable<string> SplitMessageGroups(string slice)
     {
-        const string marker = "class=chatlog__message-group";
-        var starts = MarkerDivStarts(slice, marker);
+        var starts = HtmlExportInspector.FindTopLevelMessageGroupStarts(slice);
         if (starts.Count == 0)
         {
             yield return slice;
@@ -220,26 +219,6 @@ public static partial class HtmlExportMerger
             var end = k + 1 < starts.Count ? starts[k + 1] : slice.Length;
             yield return slice[start..end];
         }
-    }
-
-    // For every literal occurrence of `marker`, return the index of the "<div" that owns it. Used
-    // only for the group marker (class=chatlog__message-group), which the template always emits
-    // clean/unquoted — containers use the quote-tolerant ContainerMarkerDivStarts instead. The group
-    // and container class names diverge after "message-", so the two markers never cross-match.
-    private static List<int> MarkerDivStarts(string text, string marker)
-    {
-        var starts = new List<int>();
-        for (
-            var m = text.IndexOf(marker, StringComparison.Ordinal);
-            m >= 0;
-            m = text.IndexOf(marker, m + 1, StringComparison.Ordinal)
-        )
-        {
-            var divStart = text.LastIndexOf("<div", m, StringComparison.Ordinal);
-            if (divStart >= 0)
-                starts.Add(divStart);
-        }
-        return starts;
     }
 
     // Locate the count match ("Exported N message(s)") within the POSTAMBLE only. Message content

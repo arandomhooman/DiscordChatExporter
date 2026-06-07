@@ -259,6 +259,87 @@ public class HtmlExportMergerSpecs
     }
 
     [Fact]
+    public async Task It_does_not_drop_a_new_message_whose_id_is_forged_in_old_nested_body_container()
+    {
+        var existing = await WriteAsync(
+            HtmlSample.ExportDetailed([
+                (
+                    100L,
+                    "<div class=chatlog__sticker><div class=chatlog__message-container data-message-id=200></div></div>",
+                    false
+                ),
+            ])
+        );
+        var fresh = await WriteAsync(
+            HtmlSample.ExportDetailed([(200L, "real new", false)]),
+            "-new"
+        );
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(100),
+            null,
+            true,
+            1,
+            true
+        );
+        try
+        {
+            var total = await HtmlExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            var merged = await File.ReadAllTextAsync(existing);
+            merged.Should().Contain("id=chatlog__message-container-200");
+            total.Should().Be(2);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
+    public async Task It_does_not_leave_orphaned_html_when_overlap_body_contains_group_marker_attribute_value()
+    {
+        var existing = await WriteAsync(HtmlSample.Export([200L]));
+        var fresh = await WriteAsync(
+            HtmlSample.ExportDetailed([
+                (
+                    200L,
+                    "<div class=chatlog__sticker title=\"x class=chatlog__message-group\"></div>",
+                    false
+                ),
+            ]),
+            "-new"
+        );
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(200),
+            null,
+            true,
+            1,
+            true
+        );
+        try
+        {
+            var total = await HtmlExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            var merged = await File.ReadAllTextAsync(existing);
+            total.Should().Be(1);
+            merged.Should().NotContain("chatlog__sticker");
+            merged.Should().Contain("Exported 1 message(s)");
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
     public async Task It_dedupes_a_pinned_message_in_the_overlap_window()
     {
         var existing = await WriteAsync(HtmlSample.Export([1000L, 2000L]));
