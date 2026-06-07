@@ -1176,6 +1176,13 @@ public partial class DashboardViewModel : ViewModelBase
                     failedChannels.Add(pair.Channel);
                     _snackbarManager.Notify(ex.Message.TrimEnd('.'));
                 }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // A locked/full-disk output file (e.g. from the writer's final flush in
+                    // DisposeAsync) must fail only this channel, not abort the whole parallel batch.
+                    failedChannels.Add(pair.Channel);
+                    _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+                }
                 finally
                 {
                     MarkExportProgressCompleted(pair.Index);
@@ -1482,7 +1489,28 @@ public partial class DashboardViewModel : ViewModelBase
             return null;
         }
 
-        var cutoff = await ContinuationFormat.ReadCutoffAsync(filePath);
+        ContinuationCutoff cutoff;
+        try
+        {
+            cutoff = await ContinuationFormat.ReadCutoffAsync(filePath);
+        }
+        catch (DiscordChatExporterException ex) when (!ex.IsFatal)
+        {
+            // The inspector already produced a user-friendly reason (corrupt/empty/unsupported file).
+            _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+            return null;
+        }
+        catch (Exception ex)
+            when (ex is IOException or UnauthorizedAccessException or FormatException)
+        {
+            // A malformed picked file can still throw a raw parse/IO error; show a friendly message
+            // instead of letting it bubble to the generic stack-trace dialog.
+            _snackbarManager.Notify(
+                $"Could not read '{Path.GetFileName(filePath)}'. It may be corrupted or unsupported."
+            );
+            return null;
+        }
+
         if (!cutoff.IsChronological)
         {
             _snackbarManager.Notify(
@@ -1622,6 +1650,13 @@ public partial class DashboardViewModel : ViewModelBase
             }
             catch (DiscordChatExporterException ex) when (!ex.IsFatal)
             {
+                failedChannels.Add(target.Channel);
+                _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Belt-and-suspenders: the mergers now raise non-fatal InvalidExportException, but
+                // isolate any stray IO failure from another continue step to this channel.
                 failedChannels.Add(target.Channel);
                 _snackbarManager.Notify(ex.Message.TrimEnd('.'));
             }
