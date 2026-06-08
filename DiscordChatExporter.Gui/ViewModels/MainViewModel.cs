@@ -123,16 +123,21 @@ public partial class MainViewModel : ViewModelBase
                     updateVersion
                 )
             );
-            await updateService.PrepareUpdateAsync(updateVersion);
+            if (!await updateService.PrepareUpdateAsync(updateVersion))
+            {
+                snackbarManager.Notify(localizationManager.UpdateFailedMessage);
+                return;
+            }
 
             snackbarManager.Notify(
                 localizationManager.UpdateReadyMessage,
                 localizationManager.UpdateInstallNowButton,
                 () =>
                 {
-                    updateService.FinalizeUpdate(true);
-
-                    App.Shutdown(2);
+                    if (updateService.FinalizeUpdate(true))
+                        App.Shutdown(2);
+                    else
+                        snackbarManager.Notify(localizationManager.UpdateFailedMessage);
                 }
             );
         }
