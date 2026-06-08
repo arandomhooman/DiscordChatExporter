@@ -1,5 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
@@ -31,6 +35,16 @@ public sealed class ExportContextAssetSpecs : IDisposable
         {
             // Best-effort cleanup.
         }
+    }
+
+    private sealed class DelegateHttpMessageHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handleAsync
+    ) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken
+        ) => handleAsync(request, cancellationToken);
     }
 
     private ExportContext CreateHtmlContext(bool shouldDownloadAssets, string? assetsDirPath = null)
@@ -106,5 +120,83 @@ public sealed class ExportContextAssetSpecs : IDisposable
         var result = await context.ResolveAssetUrlAsync("javascript:alert(1)");
 
         result.Should().Be("javascript:alert(1)");
+    }
+
+    [Fact]
+    public async Task Download_asset_reuses_signed_discord_cdn_variants_by_normalized_url()
+    {
+        var requestUrls = new List<string>();
+        using var client = new HttpClient(
+            new DelegateHttpMessageHandler(
+                (request, _) =>
+                {
+                    requestUrls.Add(request.RequestUri!.ToString());
+                    return Task.FromResult(
+                        new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent("asset"),
+                        }
+                    );
+                }
+            )
+        );
+        var downloader = new ExportAssetDownloader(_dir, reuse: false, client);
+
+        var firstPath = await downloader.DownloadAsync(
+            "https://cdn.discordapp.com/attachments/1/2/avatar.png?ex=111&is=222&hm=aaa"
+        );
+        var secondPath = await downloader.DownloadAsync(
+            "https://cdn.discordapp.com/attachments/1/2/avatar.png?ex=333&is=444&hm=bbb"
+        );
+
+        secondPath.Should().Be(firstPath);
+        downloader.DownloadedAssetCount.Should().Be(1);
+        requestUrls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Download_asset_rejects_content_length_over_size_limit()
+    {
+        using var client = new HttpClient(
+            new DelegateHttpMessageHandler(
+                (_, _) =>
+                {
+                    var response = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("asset"),
+                    };
+                    response.Content.Headers.ContentLength = 5;
+                    return Task.FromResult(response);
+                }
+            )
+        );
+        var downloader = new ExportAssetDownloader(_dir, reuse: false, client, maxFileSizeBytes: 4);
+
+        var act = async () => await downloader.DownloadAsync("https://example.com/avatar.png");
+
+        await act.Should().ThrowAsync<IOException>();
+        Directory.EnumerateFiles(_dir).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Download_asset_rejects_stream_over_size_limit_without_content_length()
+    {
+        using var client = new HttpClient(
+            new DelegateHttpMessageHandler(
+                (_, _) =>
+                    Task.FromResult(
+                        new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new ByteArrayContent(Encoding.UTF8.GetBytes("asset")),
+                        }
+                    )
+            )
+        );
+        var downloader = new ExportAssetDownloader(_dir, reuse: false, client, maxFileSizeBytes: 4);
+
+        var act = async () => await downloader.DownloadAsync("https://example.com/avatar.png");
+
+        await act.Should().ThrowAsync<IOException>();
+        Directory.EnumerateFiles(_dir).Should().BeEmpty();
     }
 }

@@ -13,33 +13,42 @@ using PowerKit.Extensions;
 
 namespace DiscordChatExporter.Core.Exporting;
 
-internal partial class ExportAssetDownloader(string workingDirPath, bool reuse)
+internal partial class ExportAssetDownloader(
+    string workingDirPath,
+    bool reuse,
+    HttpClient? httpClient = null,
+    long maxFileSizeBytes = 512 * 1024 * 1024
+)
 {
     private static readonly AsyncKeyedLocker<string> Locker = new();
+    private const int CopyBufferSize = 81920;
 
     // File paths of the previously downloaded assets
-    private readonly Dictionary<string, string> _previousPathsByUrl = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _previousPathsByNormalizedUrl = new(
+        StringComparer.Ordinal
+    );
 
     // Number of distinct asset URLs resolved during this export (downloaded or reused).
     // Best-effort metric for the export manifest.
-    public int DownloadedAssetCount => _previousPathsByUrl.Count;
+    public int DownloadedAssetCount => _previousPathsByNormalizedUrl.Count;
 
     public async ValueTask<string> DownloadAsync(
         string url,
         CancellationToken cancellationToken = default
     )
     {
+        var normalizedUrl = NormalizeUrl(url);
         var fileName = GetFileNameFromUrl(url);
         var filePath = Path.Combine(workingDirPath, fileName);
 
         using var _ = await Locker.LockAsync(filePath, cancellationToken);
 
-        if (_previousPathsByUrl.TryGetValue(url, out var cachedFilePath))
+        if (_previousPathsByNormalizedUrl.TryGetValue(normalizedUrl, out var cachedFilePath))
             return cachedFilePath;
 
         // Reuse existing files if we're allowed to
         if (reuse && File.Exists(filePath))
-            return _previousPathsByUrl[url] = filePath;
+            return _previousPathsByNormalizedUrl[normalizedUrl] = filePath;
 
         // Check for a file cached by the legacy naming scheme (5-char hash) and rename it
         // to the new naming scheme to preserve backwards compatibility with existing exports
@@ -53,7 +62,7 @@ internal partial class ExportAssetDownloader(string workingDirPath, bool reuse)
                 try
                 {
                     File.Move(legacyFilePath, filePath, overwrite: true);
-                    return _previousPathsByUrl[url] = filePath;
+                    return _previousPathsByNormalizedUrl[normalizedUrl] = filePath;
                 }
                 catch (IOException)
                 {
@@ -73,16 +82,23 @@ internal partial class ExportAssetDownloader(string workingDirPath, bool reuse)
                 try
                 {
                     // Download the file
-                    using var response = await Http.Client.GetAsync(
+                    using var response = await (httpClient ?? Http.Client).GetAsync(
                         url,
                         HttpCompletionOption.ResponseHeadersRead,
                         innerCancellationToken
                     );
                     response.EnsureSuccessStatusCode();
+                    ThrowIfTooLarge(response.Content.Headers.ContentLength, maxFileSizeBytes, url);
 
                     await using (var output = File.Create(tempFilePath))
                     {
-                        await response.Content.CopyToAsync(output, innerCancellationToken);
+                        await CopyToAsync(
+                            response.Content,
+                            output,
+                            maxFileSizeBytes,
+                            url,
+                            innerCancellationToken
+                        );
                     }
 
                     File.Move(tempFilePath, filePath, overwrite: true);
@@ -103,7 +119,45 @@ internal partial class ExportAssetDownloader(string workingDirPath, bool reuse)
             cancellationToken
         );
 
-        return _previousPathsByUrl[url] = filePath;
+        return _previousPathsByNormalizedUrl[normalizedUrl] = filePath;
+    }
+
+    private static void ThrowIfTooLarge(long? contentLength, long maxFileSizeBytes, string url)
+    {
+        if (contentLength is not null && contentLength > maxFileSizeBytes)
+            throw new IOException(
+                $"Asset '{url}' exceeds the maximum download size of {maxFileSizeBytes} bytes."
+            );
+    }
+
+    private static async ValueTask CopyToAsync(
+        HttpContent content,
+        Stream output,
+        long maxFileSizeBytes,
+        string url,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var input = await content.ReadAsStreamAsync(cancellationToken);
+        var buffer = new byte[CopyBufferSize];
+        long totalBytesRead = 0;
+
+        while (true)
+        {
+            var bytesRead = await input.ReadAsync(buffer, cancellationToken);
+            if (bytesRead <= 0)
+                return;
+
+            totalBytesRead += bytesRead;
+            if (totalBytesRead > maxFileSizeBytes)
+            {
+                throw new IOException(
+                    $"Asset '{url}' exceeds the maximum download size of {maxFileSizeBytes} bytes."
+                );
+            }
+
+            await output.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+        }
     }
 }
 
