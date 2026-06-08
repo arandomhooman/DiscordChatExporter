@@ -18,6 +18,7 @@ namespace DiscordChatExporter.Core.Exporting;
 internal class ExportContext(DiscordClient discord, ExportRequest request, bool isOffline = false)
 {
     private readonly Dictionary<Snowflake, Member?> _membersById = new();
+    private readonly Dictionary<Snowflake, Color> _memberColorsById = new();
     private readonly Dictionary<Snowflake, Channel?> _channelsById = new();
     private readonly Dictionary<Snowflake, Role> _rolesById = new();
     private readonly Dictionary<
@@ -155,7 +156,8 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
         ?? [];
 
     public Color? TryGetUserColor(Snowflake id) =>
-        GetUserRoles(id).Where(r => r.Color is not null).Select(r => r.Color).FirstOrDefault();
+        GetUserRoles(id).Where(r => r.Color is not null).Select(r => r.Color).FirstOrDefault()
+        ?? _memberColorsById.GetValueOrDefault(id);
 
     public void SeedFromConversionData(ConversionData data, IEnumerable<User>? fallbackUsers = null)
     {
@@ -211,6 +213,9 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
                 }
                 : new User(id, false, null, member.DisplayName, member.DisplayName, avatarUrl);
             _membersById[id] = new Member(user, member.DisplayName, avatarUrl, roleIds);
+
+            if (ParseColor(member.ColorHex) is { } color)
+                _memberColorsById[id] = color;
         }
     }
 

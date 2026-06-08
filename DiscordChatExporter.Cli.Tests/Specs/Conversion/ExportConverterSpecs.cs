@@ -476,6 +476,177 @@ public sealed class ExportConverterSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Converter_preserves_legacy_singular_embed_image()
+    {
+        var jsonPath = await WriteRawJsonAsync(
+            "legacy-singular-image.json",
+            """
+            {
+              "guild": { "id": "1", "name": "Test Guild", "iconUrl": "" },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": null
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [
+                    {
+                      "title": "legacy image",
+                      "type": "Image",
+                      "url": "https://example.com/post",
+                      "image": {
+                        "url": "legacy-image.png",
+                        "width": 640,
+                        "height": 480
+                      },
+                      "fields": []
+                    }
+                  ],
+                  "stickers": [],
+                  "reactions": [],
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+        var htmlOut = Path.Combine(_dir, "legacy-singular-image.html");
+
+        await ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark);
+
+        (await File.ReadAllTextAsync(htmlOut)).Should().Contain("legacy-image.png");
+    }
+
+    [Fact]
+    public async Task Converter_rejects_future_conversion_data_schema_versions()
+    {
+        var jsonPath = await WriteRawJsonAsync(
+            "future-conversion-schema.json",
+            """
+            {
+              "guild": { "id": "1", "name": "Test Guild", "iconUrl": "" },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": null
+              },
+              "messages": [],
+              "messageCount": 0,
+              "conversionData": {
+                "schemaVersion": 999,
+                "members": [],
+                "roles": [],
+                "channels": [],
+                "emojis": []
+              }
+            }
+            """
+        );
+        var htmlOut = Path.Combine(_dir, "future-conversion-schema.html");
+
+        await FluentActions
+            .Awaiting(() =>
+                ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark).AsTask()
+            )
+            .Should()
+            .ThrowAsync<InvalidExportException>()
+            .WithMessage("*conversionData.schemaVersion*");
+    }
+
+    [Fact]
+    public async Task Converter_preserves_legacy_author_role_color_without_conversion_data()
+    {
+        var jsonPath = await WriteRawJsonAsync(
+            "legacy-author-color.json",
+            """
+            {
+              "guild": { "id": "1", "name": "Test Guild", "iconUrl": "" },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": null
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "colored author",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": "#ff0000",
+                    "isBot": false,
+                    "roles": [
+                      {
+                        "id": "30",
+                        "name": "red",
+                        "color": "#ff0000",
+                        "position": 1
+                      }
+                    ],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [],
+                  "stickers": [],
+                  "reactions": [],
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+        var htmlOut = Path.Combine(_dir, "legacy-author-color.html");
+
+        await ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark);
+
+        var document = Html.Parse(await File.ReadAllTextAsync(htmlOut));
+        document
+            .QuerySelector(".chatlog__author")
+            ?.GetAttribute("style")
+            .Should()
+            .Contain("rgb(255,0,0)");
+    }
+
+    [Fact]
     public async Task Converter_does_not_emit_local_asset_urls_from_json()
     {
         var jsonPath = await WriteRawJsonAsync(

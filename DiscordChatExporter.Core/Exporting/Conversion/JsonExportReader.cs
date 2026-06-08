@@ -12,6 +12,7 @@ using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Discord.Data.Common;
 using DiscordChatExporter.Core.Discord.Data.Embeds;
 using DiscordChatExporter.Core.Exporting.Continuation;
+using PowerKit.Extensions;
 
 namespace DiscordChatExporter.Core.Exporting.Conversion;
 
@@ -62,7 +63,7 @@ public static class JsonExportReader
             var (after, before) = root.TryGetProperty("dateRange", out var dateRangeJson)
                 ? ParseDateRange(dateRangeJson)
                 : (null, null);
-            var (messages, inlineEmojis) = ParseMessages(messagesJson);
+            var (messages, inlineEmojis, legacyConversionData) = ParseMessages(messagesJson);
             var hasConversionDataBlock = root.TryGetProperty(
                 "conversionData",
                 out var conversionDataJson
@@ -70,7 +71,11 @@ public static class JsonExportReader
             var conversionData = hasConversionDataBlock
                 ? ParseConversionData(conversionDataJson)
                 : null;
-            conversionData = MergeConversionData(conversionData, inlineEmojis);
+            conversionData = MergeConversionData(
+                conversionData,
+                legacyConversionData,
+                inlineEmojis
+            );
 
             return new ParsedExport(
                 guild,
@@ -204,7 +209,7 @@ public static class JsonExportReader
             GetStringOrNull(json, "descriptionRaw") ?? GetStringOrNull(json, "description"),
             ParseArray(json, "fields", ParseEmbedField),
             json.TryGetProperty("thumbnail", out var thumbnail) ? ParseEmbedImage(thumbnail) : null,
-            ParseArray(json, "images", ParseEmbedImage),
+            ParseEmbedImages(json),
             json.TryGetProperty("video", out var video) ? ParseEmbedVideo(video) : null,
             json.TryGetProperty("footer", out var footer) ? ParseEmbedFooter(footer) : null
         );
@@ -278,6 +283,32 @@ public static class JsonExportReader
             GetInt32OrNull(json, "height")
         );
 
+    private static IReadOnlyList<EmbedImage> ParseEmbedImages(JsonElement json)
+    {
+        var images = new List<EmbedImage>();
+
+        if (
+            json.TryGetProperty("image", out var imageJson)
+            && imageJson.ValueKind == JsonValueKind.Object
+        )
+        {
+            images.Add(ParseEmbedImage(imageJson));
+        }
+
+        foreach (var imageItem in EnumerateArray(json, "images"))
+        {
+            var parsedImage = ParseEmbedImage(imageItem);
+            if (!images.Any(existing => HasSameImageSource(existing, parsedImage)))
+                images.Add(parsedImage);
+        }
+
+        return images;
+    }
+
+    private static bool HasSameImageSource(EmbedImage left, EmbedImage right) =>
+        string.Equals(left.Url, right.Url, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(left.ProxyUrl, right.ProxyUrl, StringComparison.OrdinalIgnoreCase);
+
     private static EmbedVideo ParseEmbedVideo(JsonElement json) =>
         new(
             GetAssetUrlOrNull(json, "canonicalUrl") ?? GetAssetUrlOrNull(json, "url"),
@@ -348,8 +379,32 @@ public static class JsonExportReader
             ParseUser(json.GetProperty("user"))
         );
 
-    private static ConversionData ParseConversionData(JsonElement json) =>
-        new(
+    private static ConversionData ParseConversionData(JsonElement json)
+    {
+        if (json.TryGetProperty("schemaVersion", out var schemaVersionJson))
+        {
+            int schemaVersion;
+            try
+            {
+                schemaVersion = schemaVersionJson.GetInt32();
+            }
+            catch (Exception ex) when (ex is FormatException or InvalidOperationException)
+            {
+                throw new InvalidExportException(
+                    "The conversionData.schemaVersion value is malformed.",
+                    ex
+                );
+            }
+
+            if (schemaVersion != ConversionData.CurrentSchemaVersion)
+            {
+                throw new InvalidExportException(
+                    "The conversionData.schemaVersion value is not supported."
+                );
+            }
+        }
+
+        return new ConversionData(
             ParseArray(
                 json,
                 "members",
@@ -383,6 +438,7 @@ public static class JsonExportReader
             ),
             ParseArray(json, "emojis", ParseConversionEmoji)
         );
+    }
 
     private static ConversionEmoji ParseConversionEmoji(JsonElement json) =>
         new(
@@ -394,22 +450,131 @@ public static class JsonExportReader
 
     private static (
         IReadOnlyList<Message> Messages,
-        IReadOnlyList<ConversionEmoji> InlineEmojis
+        IReadOnlyList<ConversionEmoji> InlineEmojis,
+        ConversionData? LegacyConversionData
     ) ParseMessages(JsonElement json)
     {
         var messages = new List<Message>();
         var inlineEmojis = new List<ConversionEmoji>();
+        var legacyMembersById = new Dictionary<string, ConversionMember>(StringComparer.Ordinal);
+        var legacyRolesById = new Dictionary<string, ConversionRole>(StringComparer.Ordinal);
 
         foreach (var messageJson in json.EnumerateArray())
         {
             messages.Add(ParseMessage(messageJson));
             AddInlineEmojis(messageJson, inlineEmojis);
+            AddLegacyUserConversionData(messageJson, legacyMembersById, legacyRolesById);
         }
+
+        var legacyConversionData =
+            legacyMembersById.Count > 0 || legacyRolesById.Count > 0
+                ? new ConversionData(
+                    legacyMembersById.Values.ToArray(),
+                    legacyRolesById.Values.ToArray(),
+                    []
+                )
+                : null;
 
         return (
             RelinkReferencedMessages(messages),
-            inlineEmojis.DistinctBy(emoji => (emoji.Id, emoji.Name, emoji.IsAnimated)).ToArray()
+            inlineEmojis.DistinctBy(emoji => (emoji.Id, emoji.Name, emoji.IsAnimated)).ToArray(),
+            legacyConversionData
         );
+    }
+
+    private static void AddLegacyUserConversionData(
+        JsonElement json,
+        IDictionary<string, ConversionMember> membersById,
+        IDictionary<string, ConversionRole> rolesById
+    )
+    {
+        if (json.ValueKind != JsonValueKind.Object)
+            return;
+
+        if (json.TryGetProperty("author", out var author))
+            AddLegacyUser(author, membersById, rolesById);
+
+        foreach (var mention in EnumerateArray(json, "mentions"))
+            AddLegacyUser(mention, membersById, rolesById);
+
+        foreach (var reaction in EnumerateArray(json, "reactions"))
+        {
+            foreach (var user in EnumerateArray(reaction, "users"))
+                AddLegacyUser(user, membersById, rolesById);
+        }
+
+        if (
+            json.TryGetProperty("interaction", out var interaction)
+            && interaction.ValueKind == JsonValueKind.Object
+            && interaction.TryGetProperty("user", out var interactionUser)
+        )
+        {
+            AddLegacyUser(interactionUser, membersById, rolesById);
+        }
+
+        if (json.TryGetProperty("referencedMessage", out var referencedMessage))
+            AddLegacyUserConversionData(referencedMessage, membersById, rolesById);
+    }
+
+    private static void AddLegacyUser(
+        JsonElement json,
+        IDictionary<string, ConversionMember> membersById,
+        IDictionary<string, ConversionRole> rolesById
+    )
+    {
+        if (
+            json.ValueKind != JsonValueKind.Object
+            || string.IsNullOrWhiteSpace(GetStringOrNull(json, "id"))
+        )
+            return;
+
+        var id = GetString(json, "id");
+        var roleIds = new List<string>();
+
+        foreach (var roleJson in EnumerateArray(json, "roles"))
+        {
+            var roleId = GetStringOrNull(roleJson, "id");
+            if (string.IsNullOrWhiteSpace(roleId))
+                continue;
+
+            roleIds.Add(roleId);
+            rolesById[roleId] = new ConversionRole(
+                roleId,
+                GetStringOrNull(roleJson, "name") ?? roleId,
+                ParseColorHex(GetStringOrNull(roleJson, "color")),
+                GetInt32(roleJson, "position")
+            );
+        }
+
+        var colorHex = ParseColorHex(GetStringOrNull(json, "color"));
+        if (roleIds.Count <= 0 && colorHex is null)
+            return;
+
+        var member = new ConversionMember(
+            id,
+            GetStringOrNull(json, "nickname") ?? GetStringOrNull(json, "name") ?? id,
+            GetAssetUrlOrNull(json, "avatarUrl"),
+            colorHex,
+            roleIds.Distinct(StringComparer.Ordinal).ToArray()
+        );
+
+        if (membersById.TryGetValue(id, out var existing))
+        {
+            member = member with
+            {
+                DisplayName = !string.IsNullOrWhiteSpace(member.DisplayName)
+                    ? member.DisplayName
+                    : existing.DisplayName,
+                AvatarUrl = member.AvatarUrl ?? existing.AvatarUrl,
+                ColorHex = member.ColorHex ?? existing.ColorHex,
+                RoleIds = existing
+                    .RoleIds.Concat(member.RoleIds)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray(),
+            };
+        }
+
+        membersById[id] = member;
     }
 
     private static void AddInlineEmojis(JsonElement json, ICollection<ConversionEmoji> emojis)
@@ -433,23 +598,43 @@ public static class JsonExportReader
 
     private static ConversionData? MergeConversionData(
         ConversionData? conversionData,
+        ConversionData? legacyConversionData,
         IReadOnlyList<ConversionEmoji> inlineEmojis
     )
     {
-        if (inlineEmojis.Count <= 0)
-            return conversionData;
+        if (conversionData is null && legacyConversionData is null && inlineEmojis.Count <= 0)
+            return null;
 
-        if (conversionData is null)
-            return new ConversionData([], [], [], inlineEmojis);
+        var members = MergeByKey(
+            legacyConversionData?.Members ?? [],
+            conversionData?.Members ?? [],
+            member => member.Id
+        );
+        var roles = MergeByKey(
+            legacyConversionData?.Roles ?? [],
+            conversionData?.Roles ?? [],
+            role => role.Id
+        );
+        var channels = conversionData?.Channels ?? legacyConversionData?.Channels ?? [];
+        var emojis = MergeByKey(
+            conversionData?.Emojis ?? [],
+            inlineEmojis,
+            emoji => $"{emoji.Id}|{emoji.Name}|{emoji.IsAnimated}"
+        );
 
-        return conversionData with
-        {
-            Emojis = conversionData
-                .Emojis.Concat(inlineEmojis)
-                .DistinctBy(emoji => (emoji.Id, emoji.Name, emoji.IsAnimated))
-                .ToArray(),
-        };
+        return new ConversionData(members, roles, channels, emojis);
     }
+
+    private static IReadOnlyList<T> MergeByKey<T>(
+        IEnumerable<T> lowPriority,
+        IEnumerable<T> highPriority,
+        Func<T, string> getKey
+    ) =>
+        lowPriority
+            .Concat(highPriority)
+            .GroupBy(getKey, StringComparer.Ordinal)
+            .Select(g => g.Last())
+            .ToArray();
 
     private static IReadOnlyList<Message> RelinkReferencedMessages(IReadOnlyList<Message> messages)
     {
@@ -536,6 +721,8 @@ public static class JsonExportReader
             return null;
         }
     }
+
+    private static string? ParseColorHex(string? text) => ParseColor(text)?.ToHexString();
 
     private static string GetString(JsonElement json, string propertyName) =>
         GetStringOrNull(json, propertyName) ?? "";

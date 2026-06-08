@@ -111,6 +111,21 @@ public sealed class ExportContextSeedSpecs
     }
 
     [Fact]
+    public void SeedFromConversionData_uses_member_color_when_roles_are_unavailable()
+    {
+        var context = CreateContext();
+        var data = new ConversionData(
+            [new ConversionMember("10", "Alice Display", null, "#00FF00", [])],
+            [],
+            []
+        );
+
+        context.SeedFromConversionData(data);
+
+        context.TryGetUserColor(new Snowflake(10))!.Value.Name.Should().Be("ff00ff00");
+    }
+
+    [Fact]
     public void SeedFromConversionData_populates_emoji_url_cache_by_exact_key_and_id()
     {
         var context = CreateContext();

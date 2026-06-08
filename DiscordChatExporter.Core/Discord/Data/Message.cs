@@ -85,13 +85,13 @@ public partial record Message
         {
             var embed = embeds[i];
 
-            if (embed.Url?.Contains("://twitter.com/", StringComparison.OrdinalIgnoreCase) == true)
+            if (IsMultiImageEmbedProviderUrl(embed.Url))
             {
                 // Find embeds with the same URL that only contain a single image and nothing else
                 var trailingEmbeds = embeds
                     .Skip(i + 1)
                     .TakeWhile(e =>
-                        e.Url == embed.Url
+                        string.Equals(e.Url, embed.Url, StringComparison.OrdinalIgnoreCase)
                         && e.Timestamp is null
                         && e.Author is null
                         && e.Color is null
@@ -125,6 +125,17 @@ public partial record Message
         }
 
         return normalizedEmbeds;
+    }
+
+    private static bool IsMultiImageEmbedProviderUrl(string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+
+        return uri.Host.Equals("twitter.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith(".twitter.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("x.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith(".x.com", StringComparison.OrdinalIgnoreCase);
     }
 
     public static Message Parse(JsonElement json)
