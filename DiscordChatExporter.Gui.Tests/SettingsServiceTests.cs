@@ -9,11 +9,11 @@ namespace DiscordChatExporter.Gui.Tests;
 public sealed class SettingsServiceTests
 {
     [Fact]
-    public void Token_persistence_is_opt_in_by_default()
+    public void Token_persistence_is_opt_out_by_default()
     {
         var settingsService = new SettingsService();
 
-        settingsService.IsTokenPersisted.Should().BeFalse();
+        settingsService.IsTokenPersisted.Should().BeTrue();
     }
 
     [Fact]

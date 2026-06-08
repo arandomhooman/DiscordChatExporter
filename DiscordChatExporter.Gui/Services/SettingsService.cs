@@ -31,7 +31,7 @@ public partial class SettingsService : SettingsBase
     public partial bool IsAutoUpdateEnabled { get; set; } = true;
 
     [ObservableProperty]
-    public partial bool IsTokenPersisted { get; set; }
+    public partial bool IsTokenPersisted { get; set; } = true;
 
     [ObservableProperty]
     public partial RateLimitPreference RateLimitPreference { get; set; } =
