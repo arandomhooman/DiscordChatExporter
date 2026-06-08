@@ -41,6 +41,15 @@ public partial class DashboardViewModel : ViewModelBase
 {
     private const double IncompleteProgressCeiling = 0.999;
 
+    private readonly record struct ExportProgressSnapshot(
+        long MessagesRead,
+        long? EstimatedTotal,
+        DateTimeOffset? CurrentTimestamp,
+        int CompletedChannelCount,
+        int ChannelCount,
+        bool IsRunCompleted
+    );
+
     private readonly ViewModelManager _viewModelManager;
     private readonly SnackbarManager _snackbarManager;
     private readonly DialogManager _dialogManager;
@@ -545,45 +554,76 @@ public partial class DashboardViewModel : ViewModelBase
     {
         lock (_exportProgressLock)
         {
-            return _estimatedMessagesByChannel.Length > 0
-                && _estimatedMessagesByChannel.Any(t => t is > 0);
+            for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
+            {
+                if (_estimatedMessagesByChannel[i] is > 0)
+                    return true;
+            }
+
+            return false;
         }
     }
 
-    private (
-        long MessagesRead,
-        long? EstimatedTotal,
-        DateTimeOffset? CurrentTimestamp
-    ) SnapshotExportProgress()
+    private ExportProgressSnapshot SnapshotExportProgress()
     {
         lock (_exportProgressLock)
         {
-            var messagesRead = _messagesReadByChannel.Sum();
-            var estimatedTotal = GetCorrectedEstimatedTotal(messagesRead);
-            var currentTimestamp = _currentTimestampByChannel.LastOrDefault(t => t is not null);
-            return (messagesRead, estimatedTotal, currentTimestamp);
+            return SnapshotExportProgressUnderLock();
         }
     }
 
-    private long? GetCorrectedEstimatedTotal(long messagesRead)
+    private ExportProgressSnapshot SnapshotExportProgressUnderLock()
+    {
+        var messagesRead = 0L;
+        var countedEstimateSum = 0L;
+        var countedEstimateCount = 0;
+        var completedChannelCount = 0;
+        DateTimeOffset? currentTimestamp = null;
+
+        for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
+        {
+            messagesRead += _messagesReadByChannel[i];
+
+            if (_estimatedMessagesByChannel[i] is { } estimate && estimate > 0)
+            {
+                countedEstimateSum += estimate;
+                countedEstimateCount++;
+            }
+
+            if (_currentTimestampByChannel[i] is { } timestamp)
+                currentTimestamp = timestamp;
+
+            if (_completedChannels[i])
+                completedChannelCount++;
+        }
+
+        long? estimatedTotal =
+            countedEstimateCount > 0
+                ? GetCorrectedEstimatedTotal(messagesRead, countedEstimateSum, countedEstimateCount)
+                : null;
+
+        return new ExportProgressSnapshot(
+            messagesRead,
+            estimatedTotal,
+            currentTimestamp,
+            completedChannelCount,
+            _estimatedMessagesByChannel.Length,
+            _estimatedMessagesByChannel.Length > 0
+                && completedChannelCount == _estimatedMessagesByChannel.Length
+        );
+    }
+
+    private long GetCorrectedEstimatedTotal(
+        long messagesRead,
+        long countedEstimateSum,
+        int countedEstimateCount
+    )
     {
         // Engage count-based progress as long as we counted at least one positive-total channel.
         // Channels we couldn't count borrow a fallback total: the mean of the channels we did
         // count, which the messages-read correction below then self-adjusts. Completed empty
         // channels stay at zero, but they must not become the fallback sample.
-        if (
-            _estimatedMessagesByChannel.Length == 0
-            || _estimatedMessagesByChannel.All(t => t is not > 0)
-        )
-        {
-            return null;
-        }
-
-        var counted = _estimatedMessagesByChannel
-            .Where(t => t is > 0)
-            .Select(t => t!.Value)
-            .ToArray();
-        var fallback = counted.Length > 0 ? (long)Math.Ceiling(counted.Average()) : 0;
+        var fallback = (long)Math.Ceiling((double)countedEstimateSum / countedEstimateCount);
 
         var modeledWalked = 0.0;
         var modeledRemaining = 0.0;
@@ -631,6 +671,8 @@ public partial class DashboardViewModel : ViewModelBase
 
     private void ApplyExportProgress(int index, ExportProgress progress)
     {
+        ExportProgressSnapshot snapshot;
+
         lock (_exportProgressLock)
         {
             if (index < 0 || index >= _messagesReadByChannel.Length)
@@ -645,15 +687,16 @@ public partial class DashboardViewModel : ViewModelBase
                 progress.Fraction.Fraction
             );
             _currentTimestampByChannel[index] = progress.CurrentTimestamp;
+
+            snapshot = SnapshotExportProgressUnderLock();
         }
 
-        var (messagesRead, estimatedTotal, currentTimestamp) = SnapshotExportProgress();
-        UpdateRate(messagesRead, DateTimeOffset.Now);
+        UpdateRate(snapshot.MessagesRead, DateTimeOffset.Now);
 
-        if (estimatedTotal is not null)
-            UpdateDisplayedProgressFraction(messagesRead, estimatedTotal);
+        if (snapshot.EstimatedTotal is not null)
+            UpdateDisplayedProgressFraction(snapshot.MessagesRead, snapshot.EstimatedTotal);
 
-        UpdateProgressStatusText(messagesRead, estimatedTotal, currentTimestamp);
+        UpdateProgressStatusText(snapshot, snapshot.CurrentTimestamp);
         UpdateEta();
     }
 
@@ -670,12 +713,14 @@ public partial class DashboardViewModel : ViewModelBase
 
     private void MarkExportProgressCompletedOnUiThread(int index)
     {
-        var isRunCompleted = false;
+        var completedValidChannel = false;
+        ExportProgressSnapshot snapshot;
 
         lock (_exportProgressLock)
         {
             if (index >= 0 && index < _completedChannels.Length)
             {
+                completedValidChannel = true;
                 _completedChannels[index] = true;
                 // Only refine an estimate we actually had. Never fabricate one for an uncounted
                 // channel — completing it would otherwise re-light the "X of N" + ETA display from a
@@ -683,18 +728,17 @@ public partial class DashboardViewModel : ViewModelBase
                 if (_estimatedMessagesByChannel[index] is not null)
                     _estimatedMessagesByChannel[index] = _messagesReadByChannel[index];
                 _progressFractionByChannel[index] = 1;
-                isRunCompleted = _completedChannels.All(c => c);
             }
+
+            snapshot = SnapshotExportProgressUnderLock();
         }
 
-        var (messagesRead, estimatedTotal, _) = SnapshotExportProgress();
-
-        if (isRunCompleted)
+        if (completedValidChannel && snapshot.IsRunCompleted)
             DisplayedProgressFraction = 1;
         else
-            UpdateDisplayedProgressFraction(messagesRead, estimatedTotal);
+            UpdateDisplayedProgressFraction(snapshot.MessagesRead, snapshot.EstimatedTotal);
 
-        UpdateProgressStatusText(messagesRead, estimatedTotal, null);
+        UpdateProgressStatusText(snapshot, null);
         UpdateEta();
     }
 
@@ -741,12 +785,11 @@ public partial class DashboardViewModel : ViewModelBase
     }
 
     private void UpdateProgressStatusText(
-        long messagesRead,
-        long? estimatedTotal,
+        ExportProgressSnapshot snapshot,
         DateTimeOffset? currentTimestamp
     )
     {
-        MessagesReadText = FormatMessagesRead(messagesRead, estimatedTotal);
+        MessagesReadText = FormatMessagesRead(snapshot.MessagesRead, snapshot.EstimatedTotal);
 
         RateText =
             _messageRate > 0
@@ -764,17 +807,14 @@ public partial class DashboardViewModel : ViewModelBase
             );
         }
 
-        lock (_exportProgressLock)
-        {
-            ChannelProgressText =
-                _completedChannels.Length > 1
-                    ? string.Format(
-                        LocalizationManager.ChannelProgressFormat,
-                        Math.Min(_completedChannels.Count(c => c) + 1, _completedChannels.Length),
-                        _completedChannels.Length
-                    )
-                    : null;
-        }
+        ChannelProgressText =
+            snapshot.ChannelCount > 1
+                ? string.Format(
+                    LocalizationManager.ChannelProgressFormat,
+                    Math.Min(snapshot.CompletedChannelCount + 1, snapshot.ChannelCount),
+                    snapshot.ChannelCount
+                )
+                : null;
     }
 
     private async ValueTask CopyUserMessagesAsync(
