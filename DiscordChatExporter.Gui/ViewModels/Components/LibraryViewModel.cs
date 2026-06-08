@@ -19,6 +19,8 @@ public partial class LibraryViewModel : ViewModelBase
 {
     private readonly SettingsService _settingsService;
     private readonly DialogManager _dialogManager;
+    private readonly SnackbarManager _snackbarManager;
+    private readonly Action _saveSettings;
 
     // Cached file -> catalog-entry lookup, rebuilt on each reload, so search labelling doesn't
     // rebuild a dictionary over the whole catalog on every query.
@@ -29,11 +31,29 @@ public partial class LibraryViewModel : ViewModelBase
     public LibraryViewModel(
         SettingsService settingsService,
         DialogManager dialogManager,
+        SnackbarManager snackbarManager,
         LocalizationManager localizationManager
+    )
+        : this(
+            settingsService,
+            dialogManager,
+            snackbarManager,
+            localizationManager,
+            settingsService.Save
+        ) { }
+
+    internal LibraryViewModel(
+        SettingsService settingsService,
+        DialogManager dialogManager,
+        SnackbarManager snackbarManager,
+        LocalizationManager localizationManager,
+        Action saveSettings
     )
     {
         _settingsService = settingsService;
         _dialogManager = dialogManager;
+        _snackbarManager = snackbarManager;
+        _saveSettings = saveSettings;
         LocalizationManager = localizationManager;
     }
 
@@ -109,14 +129,29 @@ public partial class LibraryViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(root))
             return;
 
+        await ScanFolderAsync(root);
+    }
+
+    internal async Task ScanFolderAsync(string root)
+    {
         var found = await ExportCatalogBuilder.ScanForExportDirsAsync(root);
+        var previousDirs = _settingsService.KnownExportDirs;
 
         // Merge scanned dirs into the persisted list (most-recent-first), then reload.
-        foreach (var dir in found)
-            _settingsService.KnownExportDirs = RecentExportDirs
-                .Add(_settingsService.KnownExportDirs, dir, 200)
-                .ToArray();
-        _settingsService.Save();
+        try
+        {
+            foreach (var dir in found)
+                _settingsService.KnownExportDirs = RecentExportDirs
+                    .Add(_settingsService.KnownExportDirs, dir, 200)
+                    .ToArray();
+            _saveSettings();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _settingsService.KnownExportDirs = previousDirs;
+            _snackbarManager.Notify(ex.Message.TrimEnd('.'));
+            return;
+        }
 
         await ReloadAsync(_settingsService.KnownExportDirs);
     }
