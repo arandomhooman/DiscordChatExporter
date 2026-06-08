@@ -10,6 +10,7 @@ using DiscordChatExporter.Core.Exporting.Filtering;
 using DiscordChatExporter.Core.Exporting.Library;
 using DiscordChatExporter.Core.Exporting.Partitioning;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace DiscordChatExporter.Cli.Tests.Specs;
@@ -108,6 +109,27 @@ public class SqliteExportReaderSpecs : IDisposable
         return dbPath;
     }
 
+    private async Task<string> WriteMalformedSearchDbAsync(string fileName)
+    {
+        var dbPath = Path.Combine(_dirPath, fileName);
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ToString()
+        );
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE authors (id TEXT, name TEXT);
+            CREATE TABLE messages (id TEXT, timestamp TEXT, author_id TEXT);
+            CREATE VIRTUAL TABLE messages_fts USING fts5(content, message_id UNINDEXED);
+            INSERT INTO messages (id, timestamp, author_id) VALUES ('1', NULL, NULL);
+            INSERT INTO messages_fts (content, message_id) VALUES ('fox', '1');
+            """;
+        await command.ExecuteNonQueryAsync();
+
+        return dbPath;
+    }
+
     [Fact]
     public async Task It_finds_messages_matching_a_term()
     {
@@ -186,5 +208,16 @@ public class SqliteExportReaderSpecs : IDisposable
 
         hits.Select(h => h.DatabaseFilePath).Should().BeEquivalentTo([db1, db2]);
         hits.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task It_skips_malformed_rows_with_null_required_fields()
+    {
+        var db = await WriteMalformedSearchDbAsync("malformed.db");
+
+        var act = async () => await SqliteExportReader.SearchAsync(db, "fox", 50, default);
+
+        await act.Should().NotThrowAsync();
+        (await SqliteExportReader.SearchAsync(db, "fox", 50, default)).Should().BeEmpty();
     }
 }

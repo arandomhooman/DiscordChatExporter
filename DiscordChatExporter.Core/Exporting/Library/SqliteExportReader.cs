@@ -54,6 +54,9 @@ public static class SqliteExportReader
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
+                if (reader.IsDBNull(0) || reader.IsDBNull(1))
+                    continue;
+
                 hits.Add(
                     new SqliteSearchHit(
                         databaseFilePath,
