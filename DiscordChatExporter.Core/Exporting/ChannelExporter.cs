@@ -34,6 +34,7 @@ public class ChannelExporter(DiscordClient discord)
         // Initialize the exporter before further checks to ensure the file is created even if
         // an exception is thrown after this point.
         var messageExporter = new MessageExporter(context);
+        Exception? exportException = null;
         try
         {
             // Check if the channel is empty
@@ -113,10 +114,31 @@ public class ChannelExporter(DiscordClient discord)
                     );
                 }
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (Exception ex)
+        {
+            exportException = ex;
+            throw;
         }
         finally
         {
-            await messageExporter.DisposeAsync();
+            if (exportException is null or ChannelEmptyException)
+            {
+                await messageExporter.DisposeAsync(cancellationToken);
+            }
+            else
+            {
+                try
+                {
+                    await messageExporter.AbortAsync();
+                }
+                catch
+                {
+                    // Preserve the original export exception.
+                }
+            }
         }
 
         return new ExportResult(

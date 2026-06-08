@@ -82,6 +82,15 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
         }
     }
 
+    private async ValueTask AbortWriterAsync()
+    {
+        if (_writer is null)
+            return;
+
+        await _writer.DisposeAsync();
+        _writer = null;
+    }
+
     public async ValueTask ExportMessageAsync(
         Message message,
         CancellationToken cancellationToken = default
@@ -93,14 +102,24 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
         MessagesExported++;
     }
 
-    public async ValueTask DisposeAsync()
+    internal async ValueTask DisposeAsync(CancellationToken cancellationToken)
     {
-        // If not messages were written, force the creation of an empty file
-        if (MessagesExported <= 0 && !_hasWriterInitializationFailed)
-            _ = await InitializeWriterAsync();
+        if (cancellationToken.IsCancellationRequested)
+        {
+            await AbortWriterAsync();
+            return;
+        }
 
-        await UninitializeWriterAsync();
+        // If no messages were written, force the creation of an empty file.
+        if (MessagesExported <= 0 && !_hasWriterInitializationFailed)
+            _ = await InitializeWriterAsync(cancellationToken);
+
+        await UninitializeWriterAsync(cancellationToken);
     }
+
+    internal async ValueTask AbortAsync() => await AbortWriterAsync();
+
+    public async ValueTask DisposeAsync() => await DisposeAsync(CancellationToken.None);
 
     private sealed class MutableFileStats(string filePath)
     {
