@@ -8,10 +8,7 @@ public partial class LocalizationManager
         new Dictionary<string, string>
         {
             // Dashboard
-            [nameof(EtaEstimatingText)] = "estimating time remaining…",
-            [nameof(EtaRemainingFormat)] = "~{0} left",
             [nameof(MessagesReadFormat)] = "{0} messages",
-            [nameof(MessagesProgressFormat)] = "{0} of {1} messages ({2} left)",
             [nameof(MessageRateFormat)] = "{0}/s",
             [nameof(ExportedThroughFormat)] = "exported through {0}",
             [nameof(ChannelProgressFormat)] = "Channel {0} of {1}",

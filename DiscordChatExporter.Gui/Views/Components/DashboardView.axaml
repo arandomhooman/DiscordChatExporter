@@ -153,11 +153,6 @@
                     FontSize="11"
                     Foreground="{DynamicResource MaterialDarkForegroundBrush}"
                     Text="{Binding ExportedThroughText}" />
-                <TextBlock
-                    FontSize="11"
-                    Foreground="{DynamicResource MaterialDarkForegroundBrush}"
-                    IsVisible="{Binding HasEta}"
-                    Text="{Binding EtaText}" />
             </StackPanel>
         </StackPanel>
 

@@ -66,198 +66,79 @@ public sealed class DashboardProgressTests
         method!.Invoke(viewModel, args);
     }
 
-    private static T? Invoke<T>(
-        DashboardViewModel viewModel,
-        string methodName,
-        params object?[] args
-    )
-    {
-        var method = typeof(DashboardViewModel).GetMethod(
-            methodName,
-            BindingFlags.Instance | BindingFlags.NonPublic
-        );
-
-        method.Should().NotBeNull();
-        return (T?)method!.Invoke(viewModel, args);
-    }
-
     [AvaloniaFact]
-    public void Completed_channel_shrinks_overestimated_total_to_actual_messages_read()
+    public void Progress_bar_uses_muxer_fraction_without_count_estimates()
     {
         var viewModel = CreateViewModel();
 
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { 10, 10 });
-        Invoke(
-            viewModel,
-            "ApplyExportProgress",
-            0,
-            new ExportProgress(Percentage.FromFraction(0.2), 2, DateTimeOffset.UnixEpoch)
-        );
-
-        Invoke(viewModel, "MarkExportProgressCompleted", 0);
-
-        viewModel.DisplayedProgressFraction.Should().BeApproximately(2.0 / 12, 0.0001);
-    }
-
-    [AvaloniaFact]
-    public void Completed_run_with_overestimated_totals_reports_finished()
-    {
-        var viewModel = CreateViewModel();
-
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { 10 });
-        Invoke(
-            viewModel,
-            "ApplyExportProgress",
-            0,
-            new ExportProgress(Percentage.FromFraction(0.2), 2, DateTimeOffset.UnixEpoch)
-        );
-
-        Invoke(viewModel, "MarkExportProgressCompleted", 0);
-
-        viewModel.DisplayedProgressFraction.Should().Be(1);
-    }
-
-    [AvaloniaFact]
-    public void Underestimated_count_stays_below_finished_until_channel_completes()
-    {
-        var viewModel = CreateViewModel();
-
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { 2 });
-        Invoke(
-            viewModel,
-            "ApplyExportProgress",
-            0,
-            new ExportProgress(Percentage.FromFraction(0.5), 3, DateTimeOffset.UnixEpoch)
-        );
-
-        viewModel.DisplayedProgressFraction.Should().BeLessThan(1);
-
-        Invoke(viewModel, "MarkExportProgressCompleted", 0);
-
-        viewModel.DisplayedProgressFraction.Should().Be(1);
-    }
-
-    [AvaloniaFact]
-    public void Overestimated_count_is_corrected_by_modeled_progress_fraction()
-    {
-        var viewModel = CreateViewModel();
-
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { 100 });
-        Invoke(
-            viewModel,
-            "ApplyExportProgress",
-            0,
-            new ExportProgress(Percentage.FromFraction(0.5), 10, DateTimeOffset.UnixEpoch)
-        );
-
-        viewModel.DisplayedProgressFraction.Should().BeApproximately(0.5, 0.0001);
-    }
-
-    [AvaloniaFact]
-    public void Mixed_missing_estimate_still_uses_count_based_progress()
-    {
-        var viewModel = CreateViewModel();
-
-        // One channel counted (2), one uncountable (null). The uncounted channel borrows the
-        // counted channel's total as a fallback, so the bar stays count-based instead of reverting
-        // to the muxer's timestamp fraction (which would read ~0.25 here).
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { 2, null });
+        Invoke(viewModel, "StartExportProgressRun", 1);
         viewModel.Progress.Report(Percentage.FromFraction(0.25));
         Dispatcher.UIThread.RunJobs();
 
         Invoke(
             viewModel,
             "ApplyExportProgress",
-            1,
-            new ExportProgress(Percentage.FromFraction(0.9), 1, DateTimeOffset.UnixEpoch)
-        );
-
-        // read=1 over a modeled total of ~3 (fallback 2 for the uncounted channel, corrected by the
-        // 1 message actually read at fraction 0.9) -> ~0.333, NOT the muxer's 0.25.
-        viewModel.DisplayedProgressFraction.Should().BeApproximately(1.0 / 3, 0.02);
-    }
-
-    [AvaloniaFact]
-    public void Completed_empty_unknown_channel_does_not_enable_count_based_progress()
-    {
-        var viewModel = CreateViewModel();
-
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { null, null });
-        viewModel.Progress.Report(Percentage.FromFraction(0.25));
-        Dispatcher.UIThread.RunJobs();
-
-        Invoke(viewModel, "MarkExportProgressCompleted", 0);
-        Invoke(
-            viewModel,
-            "ApplyExportProgress",
-            1,
-            new ExportProgress(Percentage.FromFraction(0), 1, DateTimeOffset.UnixEpoch)
+            0,
+            new ExportProgress(Percentage.FromFraction(0.9), 5, DateTimeOffset.UnixEpoch)
         );
 
         viewModel.DisplayedProgressFraction.Should().BeApproximately(0.25, 0.0001);
-    }
-
-    [AvaloniaFact]
-    public void Status_text_shows_messages_left_when_total_is_known()
-    {
-        var viewModel = CreateViewModel();
-
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { 100 });
-        Invoke(
-            viewModel,
-            "ApplyExportProgress",
-            0,
-            new ExportProgress(Percentage.FromFraction(0.1), 10, DateTimeOffset.UnixEpoch)
-        );
-
-        // total corrects to 100, read 10 -> 90 left.
-        viewModel.MessagesReadText.Should().Contain("90 left");
-    }
-
-    [AvaloniaFact]
-    public void Status_text_shows_only_read_count_when_total_is_unknown()
-    {
-        var viewModel = CreateViewModel();
-
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { (long?)null });
-        Invoke(
-            viewModel,
-            "ApplyExportProgress",
-            0,
-            new ExportProgress(Percentage.FromFraction(0.5), 5, DateTimeOffset.UnixEpoch)
-        );
-
-        viewModel.MessagesReadText.Should().NotBeNull();
+        viewModel.MessagesReadText.Should().Be("5 messages");
         viewModel.MessagesReadText.Should().NotContain("left");
     }
 
     [AvaloniaFact]
-    public void Status_text_hides_messages_left_when_total_is_overrun()
+    public void Completed_run_reports_finished()
     {
         var viewModel = CreateViewModel();
 
-        var text = Invoke<string>(viewModel, "FormatMessagesRead", 5L, 2L);
+        Invoke(viewModel, "StartExportProgressRun", 1);
+        viewModel.Progress.Report(Percentage.FromFraction(0.2));
+        Dispatcher.UIThread.RunJobs();
 
-        text.Should().Be("5 messages");
+        Invoke(viewModel, "MarkExportProgressCompleted", 0);
+
+        viewModel.DisplayedProgressFraction.Should().Be(1);
     }
 
     [AvaloniaFact]
-    public void No_eta_is_shown_without_a_count_estimate()
+    public void Channel_progress_advances_across_multiple_channels()
     {
         var viewModel = CreateViewModel();
-        viewModel.IsBusy = true;
 
-        // No positive count (e.g. a continue, which no longer estimates) -> the only progress signal
-        // is the biased timestamp fraction, so the ETA must stay hidden rather than show a bad guess.
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { (long?)null });
+        Invoke(viewModel, "StartExportProgressRun", 2);
         Invoke(
             viewModel,
             "ApplyExportProgress",
             0,
-            new ExportProgress(Percentage.FromFraction(0.5), 5, DateTimeOffset.UnixEpoch)
+            new ExportProgress(Percentage.FromFraction(0.5), 2, DateTimeOffset.UnixEpoch)
         );
 
-        viewModel.EtaText.Should().BeNull();
+        viewModel.ChannelProgressText.Should().Be("Channel 1 of 2");
+
+        Invoke(viewModel, "MarkExportProgressCompleted", 0);
+
+        viewModel.ChannelProgressText.Should().Be("Channel 2 of 2");
+    }
+
+    [AvaloniaFact]
+    public void Progress_status_shows_latest_exported_month()
+    {
+        var viewModel = CreateViewModel();
+
+        Invoke(viewModel, "StartExportProgressRun", 2);
+        Invoke(
+            viewModel,
+            "ApplyExportProgress",
+            0,
+            new ExportProgress(
+                Percentage.FromFraction(0.5),
+                1,
+                new DateTimeOffset(2024, 02, 03, 0, 0, 0, TimeSpan.Zero)
+            )
+        );
+
+        viewModel.ExportedThroughText.Should().Be("exported through Feb 2024");
     }
 
     [AvaloniaFact]
@@ -267,7 +148,7 @@ public sealed class DashboardProgressTests
         var uiThreadId = Environment.CurrentManagedThreadId;
         var progressChangedThreadIds = new List<int>();
 
-        Invoke(viewModel, "StartExportProgressRun", new long?[] { 10 });
+        Invoke(viewModel, "StartExportProgressRun", 1);
         Invoke(
             viewModel,
             "ApplyExportProgress",
@@ -283,7 +164,7 @@ public sealed class DashboardProgressTests
 
         await Task.Run(() => Invoke(viewModel, "MarkExportProgressCompleted", 0));
 
-        viewModel.DisplayedProgressFraction.Should().BeApproximately(0.2, 0.0001);
+        viewModel.DisplayedProgressFraction.Should().Be(0);
 
         Dispatcher.UIThread.RunJobs();
 

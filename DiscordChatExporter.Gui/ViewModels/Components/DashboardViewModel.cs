@@ -39,11 +39,8 @@ namespace DiscordChatExporter.Gui.ViewModels.Components;
 
 public partial class DashboardViewModel : ViewModelBase
 {
-    private const double IncompleteProgressCeiling = 0.999;
-
     private readonly record struct ExportProgressSnapshot(
         long MessagesRead,
-        long? EstimatedTotal,
         DateTimeOffset? CurrentTimestamp,
         int CompletedChannelCount,
         int ChannelCount,
@@ -57,18 +54,14 @@ public partial class DashboardViewModel : ViewModelBase
 
     private readonly IDisposable _eventSubscription;
     private readonly AutoResetProgressMuxer _progressMuxer;
-    private readonly EtaEstimator _etaEstimator = new();
     private readonly object _exportProgressLock = new();
 
-    private long?[] _estimatedMessagesByChannel = [];
     private long[] _messagesReadByChannel = [];
-    private double[] _progressFractionByChannel = [];
     private DateTimeOffset?[] _currentTimestampByChannel = [];
     private bool[] _completedChannels = [];
     private long _lastRateMessagesRead;
     private double _messageRate;
     private DateTimeOffset? _lastRateUpdate;
-    private bool _isExportProgressRunActive;
     private int _activeRateLimitPauseCount;
 
     private DiscordClient? _discord;
@@ -100,11 +93,8 @@ public partial class DashboardViewModel : ViewModelBase
                 _ =>
                     Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                     {
-                        if (!_isExportProgressRunActive || !HasAnyCountEstimate())
-                            DisplayedProgressFraction = Progress.Current.Fraction;
-
+                        DisplayedProgressFraction = Progress.Current.Fraction;
                         OnPropertyChanged(nameof(IsProgressIndeterminate));
-                        UpdateEta();
                     })
             ),
             SelectedChannels.WatchProperty(
@@ -131,13 +121,6 @@ public partial class DashboardViewModel : ViewModelBase
     [NotifyCanExecuteChangedFor(nameof(NavigateToLibraryCommand))]
     [NotifyCanExecuteChangedFor(nameof(NavigateToConversionCommand))]
     public partial bool IsBusy { get; set; }
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasEta))]
-    [NotifyPropertyChangedFor(nameof(HasProgressDisplay))]
-    public partial string? EtaText { get; set; }
-
-    public bool HasEta => !string.IsNullOrEmpty(EtaText);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsProgressIndeterminate))]
@@ -177,7 +160,7 @@ public partial class DashboardViewModel : ViewModelBase
 
     public bool IsRateLimitPaused => !string.IsNullOrEmpty(RateLimitPauseText);
 
-    public bool HasProgressDisplay => HasProgressStatus || HasEta || IsRateLimitPaused;
+    public bool HasProgressDisplay => HasProgressStatus || IsRateLimitPaused;
 
     public LocalizationManager LocalizationManager { get; }
 
@@ -491,21 +474,16 @@ public partial class DashboardViewModel : ViewModelBase
     {
         lock (_exportProgressLock)
         {
-            _estimatedMessagesByChannel = [];
             _messagesReadByChannel = [];
-            _progressFractionByChannel = [];
             _currentTimestampByChannel = [];
             _completedChannels = [];
             _lastRateMessagesRead = 0;
             _messageRate = 0;
             _lastRateUpdate = null;
-            _isExportProgressRunActive = false;
         }
 
         _activeRateLimitPauseCount = 0;
-        _etaEstimator.Reset();
         DisplayedProgressFraction = 0;
-        EtaText = null;
         MessagesReadText = null;
         RateText = null;
         ExportedThroughText = null;
@@ -513,32 +491,20 @@ public partial class DashboardViewModel : ViewModelBase
         RateLimitPauseText = null;
     }
 
-    private void StartExportProgressRun(IReadOnlyList<long?> estimatedMessagesByChannel)
+    private void StartExportProgressRun(int channelCount)
     {
         lock (_exportProgressLock)
         {
-            _estimatedMessagesByChannel = estimatedMessagesByChannel.ToArray();
-            _messagesReadByChannel = new long[_estimatedMessagesByChannel.Length];
-            _progressFractionByChannel = new double[_estimatedMessagesByChannel.Length];
-            _currentTimestampByChannel = new DateTimeOffset?[_estimatedMessagesByChannel.Length];
-            _completedChannels = new bool[_estimatedMessagesByChannel.Length];
+            _messagesReadByChannel = new long[channelCount];
+            _currentTimestampByChannel = new DateTimeOffset?[channelCount];
+            _completedChannels = new bool[channelCount];
             _lastRateMessagesRead = 0;
             _messageRate = 0;
             _lastRateUpdate = null;
-            _isExportProgressRunActive = true;
         }
 
         DisplayedProgressFraction = 0;
     }
-
-    // Count estimation is disabled everywhere. It called Discord's heavily rate-limited search
-    // endpoint once per channel; under the default "Always respect" rate-limit preference each call
-    // could stall ~55s, so a multi-channel export/continue spent minutes paused before the download
-    // even started (and showed an "X of Y" that was the source of the rate limits). With no totals,
-    // progress uses the time-based bar only — no ETA, no "messages left", and no count querying.
-    private static Task<long?[]> EstimateMessageTotalsAsync(
-        IReadOnlyList<ExportRequest> requests
-    ) => Task.FromResult(new long?[requests.Count]);
 
     private IProgress<ExportProgress> CreateExportProgressInput(
         int index,
@@ -550,45 +516,15 @@ public partial class DashboardViewModel : ViewModelBase
             Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyExportProgress(index, progress));
         });
 
-    private bool HasAnyCountEstimate()
-    {
-        lock (_exportProgressLock)
-        {
-            for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
-            {
-                if (_estimatedMessagesByChannel[i] is > 0)
-                    return true;
-            }
-
-            return false;
-        }
-    }
-
-    private ExportProgressSnapshot SnapshotExportProgress()
-    {
-        lock (_exportProgressLock)
-        {
-            return SnapshotExportProgressUnderLock();
-        }
-    }
-
     private ExportProgressSnapshot SnapshotExportProgressUnderLock()
     {
         var messagesRead = 0L;
-        var countedEstimateSum = 0L;
-        var countedEstimateCount = 0;
         var completedChannelCount = 0;
         DateTimeOffset? currentTimestamp = null;
 
-        for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
+        for (var i = 0; i < _messagesReadByChannel.Length; i++)
         {
             messagesRead += _messagesReadByChannel[i];
-
-            if (_estimatedMessagesByChannel[i] is { } estimate && estimate > 0)
-            {
-                countedEstimateSum += estimate;
-                countedEstimateCount++;
-            }
 
             if (_currentTimestampByChannel[i] is { } timestamp)
                 currentTimestamp = timestamp;
@@ -597,76 +533,14 @@ public partial class DashboardViewModel : ViewModelBase
                 completedChannelCount++;
         }
 
-        long? estimatedTotal =
-            countedEstimateCount > 0
-                ? GetCorrectedEstimatedTotal(messagesRead, countedEstimateSum, countedEstimateCount)
-                : null;
-
         return new ExportProgressSnapshot(
             messagesRead,
-            estimatedTotal,
             currentTimestamp,
             completedChannelCount,
-            _estimatedMessagesByChannel.Length,
-            _estimatedMessagesByChannel.Length > 0
-                && completedChannelCount == _estimatedMessagesByChannel.Length
+            _messagesReadByChannel.Length,
+            _messagesReadByChannel.Length > 0
+                && completedChannelCount == _messagesReadByChannel.Length
         );
-    }
-
-    private long GetCorrectedEstimatedTotal(
-        long messagesRead,
-        long countedEstimateSum,
-        int countedEstimateCount
-    )
-    {
-        // Engage count-based progress as long as we counted at least one positive-total channel.
-        // Channels we couldn't count borrow a fallback total: the mean of the channels we did
-        // count, which the messages-read correction below then self-adjusts. Completed empty
-        // channels stay at zero, but they must not become the fallback sample.
-        var fallback = (long)Math.Ceiling((double)countedEstimateSum / countedEstimateCount);
-
-        var modeledWalked = 0.0;
-        var modeledRemaining = 0.0;
-        for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
-        {
-            // For an uncounted channel, assume the fallback total, but never less than what it has
-            // already read (so its contribution can't shrink below reality).
-            var estimate =
-                _estimatedMessagesByChannel[i] ?? Math.Max(fallback, _messagesReadByChannel[i]);
-            var fraction = _completedChannels[i]
-                ? 1
-                : Math.Clamp(_progressFractionByChannel[i], 0, 1);
-
-            modeledWalked += estimate * fraction;
-            modeledRemaining += estimate * (1 - fraction);
-        }
-
-        if (messagesRead > 0 && modeledWalked > 0)
-        {
-            var correction = messagesRead / modeledWalked;
-            var correctedTotal = messagesRead + correction * modeledRemaining;
-            return Math.Max(messagesRead, (long)Math.Ceiling(correctedTotal));
-        }
-
-        // No reads yet: sum counted channels plus the fallback for the uncounted ones.
-        long sum = 0;
-        for (var i = 0; i < _estimatedMessagesByChannel.Length; i++)
-            sum += _estimatedMessagesByChannel[i] ?? fallback;
-        return sum;
-    }
-
-    private void UpdateDisplayedProgressFraction(long messagesRead, long? estimatedTotal)
-    {
-        if (estimatedTotal is null)
-            return;
-
-        var correctedTotal = Math.Max(estimatedTotal.Value, messagesRead);
-        var countFraction = correctedTotal > 0 ? (double)messagesRead / correctedTotal : 0;
-        var displayedFraction = Math.Min(
-            Math.Clamp(countFraction, 0, 1),
-            IncompleteProgressCeiling
-        );
-        DisplayedProgressFraction = Math.Max(DisplayedProgressFraction, displayedFraction);
     }
 
     private void ApplyExportProgress(int index, ExportProgress progress)
@@ -682,10 +556,6 @@ public partial class DashboardViewModel : ViewModelBase
                 _messagesReadByChannel[index],
                 progress.MessagesRead
             );
-            _progressFractionByChannel[index] = Math.Max(
-                _progressFractionByChannel[index],
-                progress.Fraction.Fraction
-            );
             _currentTimestampByChannel[index] = progress.CurrentTimestamp;
 
             snapshot = SnapshotExportProgressUnderLock();
@@ -693,11 +563,7 @@ public partial class DashboardViewModel : ViewModelBase
 
         UpdateRate(snapshot.MessagesRead, DateTimeOffset.Now);
 
-        if (snapshot.EstimatedTotal is not null)
-            UpdateDisplayedProgressFraction(snapshot.MessagesRead, snapshot.EstimatedTotal);
-
         UpdateProgressStatusText(snapshot, snapshot.CurrentTimestamp);
-        UpdateEta();
     }
 
     private static void RunOrPostToUiThread(Action action)
@@ -722,12 +588,6 @@ public partial class DashboardViewModel : ViewModelBase
             {
                 completedValidChannel = true;
                 _completedChannels[index] = true;
-                // Only refine an estimate we actually had. Never fabricate one for an uncounted
-                // channel — completing it would otherwise re-light the "X of N" + ETA display from a
-                // retroactive total, even though no real count was ever queried.
-                if (_estimatedMessagesByChannel[index] is not null)
-                    _estimatedMessagesByChannel[index] = _messagesReadByChannel[index];
-                _progressFractionByChannel[index] = 1;
             }
 
             snapshot = SnapshotExportProgressUnderLock();
@@ -735,11 +595,8 @@ public partial class DashboardViewModel : ViewModelBase
 
         if (completedValidChannel && snapshot.IsRunCompleted)
             DisplayedProgressFraction = 1;
-        else
-            UpdateDisplayedProgressFraction(snapshot.MessagesRead, snapshot.EstimatedTotal);
 
         UpdateProgressStatusText(snapshot, null);
-        UpdateEta();
     }
 
     private void UpdateRate(long messagesRead, DateTimeOffset now)
@@ -763,24 +620,12 @@ public partial class DashboardViewModel : ViewModelBase
         _lastRateMessagesRead = messagesRead;
     }
 
-    private string? FormatMessagesRead(long messagesRead, long? estimatedTotal)
+    private string? FormatMessagesRead(long messagesRead)
     {
         if (messagesRead <= 0)
             return null;
 
         var read = messagesRead.ToString("N0", CultureInfo.CurrentCulture);
-
-        // Only show "left" when we actually have a total and it hasn't been overrun.
-        if (estimatedTotal is { } total && total >= messagesRead)
-        {
-            return string.Format(
-                LocalizationManager.MessagesProgressFormat,
-                read,
-                total.ToString("N0", CultureInfo.CurrentCulture),
-                (total - messagesRead).ToString("N0", CultureInfo.CurrentCulture)
-            );
-        }
-
         return string.Format(LocalizationManager.MessagesReadFormat, read);
     }
 
@@ -789,7 +634,7 @@ public partial class DashboardViewModel : ViewModelBase
         DateTimeOffset? currentTimestamp
     )
     {
-        MessagesReadText = FormatMessagesRead(snapshot.MessagesRead, snapshot.EstimatedTotal);
+        MessagesReadText = FormatMessagesRead(snapshot.MessagesRead);
 
         RateText =
             _messageRate > 0
@@ -847,7 +692,7 @@ public partial class DashboardViewModel : ViewModelBase
                 _settingsService.IsUtcNormalizationEnabled
             );
 
-            StartExportProgressRun(await EstimateMessageTotalsAsync([request]));
+            StartExportProgressRun(1);
             await exporter.ExportChannelAsync(
                 request,
                 CreateExportProgressInput(0, progress),
@@ -940,7 +785,6 @@ public partial class DashboardViewModel : ViewModelBase
         {
             EndCancelableOperation();
             IsBusy = false;
-            EtaText = null;
         }
     }
 
@@ -1197,9 +1041,7 @@ public partial class DashboardViewModel : ViewModelBase
                     }
             )
             .ToArray();
-        StartExportProgressRun(
-            await EstimateMessageTotalsAsync(pairs.Select(p => p.Request).ToArray())
-        );
+        StartExportProgressRun(pairs.Length);
 
         var exportStats = new ConcurrentBag<ChannelExportStats>();
         var failedChannels = new ConcurrentBag<Channel>();
@@ -1384,7 +1226,6 @@ public partial class DashboardViewModel : ViewModelBase
         {
             EndCancelableOperation();
             IsBusy = false;
-            EtaText = null;
         }
     }
 
@@ -1471,11 +1312,7 @@ public partial class DashboardViewModel : ViewModelBase
                 .ToArray();
             var pairsByTarget = pairs.ToDictionary(p => p.Target);
 
-            // No up-front count estimation on continue: it used Discord's aggressively rate-limited
-            // search endpoint (and usually couldn't size the recent "since last time" range anyway),
-            // which is what caused the ~55s rate-limit stalls. Continue uses the time-based progress
-            // bar only — with no count total there is intentionally no ETA or "messages left".
-            StartExportProgressRun(new long?[pairs.Length]);
+            StartExportProgressRun(pairs.Length);
 
             var summary = await RunContinueLoopAsync(
                 pairs.Select(p => p.Target).ToArray(),
@@ -1520,7 +1357,6 @@ public partial class DashboardViewModel : ViewModelBase
         {
             EndCancelableOperation();
             IsBusy = false;
-            EtaText = null;
         }
     }
 
@@ -1844,27 +1680,6 @@ public partial class DashboardViewModel : ViewModelBase
             parts.Add(LocalizationManager.ExportCatalogWriteFailedMessage);
 
         return string.Join(" ", parts);
-    }
-
-    private void UpdateEta()
-    {
-        // Only show a time estimate when it's backed by a real message-count total. Without counts
-        // (continue, or an export whose channels the search endpoint couldn't size) the only progress
-        // signal is the biased message-timestamp fraction, which made the ETA balloon — so show none.
-        if (!IsBusy || !HasAnyCountEstimate())
-        {
-            EtaText = null;
-            return;
-        }
-        _etaEstimator.Report(DisplayedProgressFraction, DateTimeOffset.Now);
-        var estimate = _etaEstimator.Estimate;
-        EtaText =
-            estimate is null ? LocalizationManager.EtaEstimatingText
-            : estimate.Value <= TimeSpan.Zero ? null
-            : string.Format(
-                LocalizationManager.EtaRemainingFormat,
-                _etaEstimator.IsCapped ? "> 12 h" : FormatDuration(estimate.Value)
-            );
     }
 
     private static string FormatDuration(TimeSpan t) =>
