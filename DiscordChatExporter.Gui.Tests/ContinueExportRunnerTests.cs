@@ -278,7 +278,8 @@ public sealed class ContinueExportRunnerTests
                 entries,
                 guild,
                 byId,
-                unresolved
+                unresolved,
+                TestContext.Current.CancellationToken
             );
 
             targets.Should().ContainSingle().Which.Channel.Id.Should().Be(good.Id);

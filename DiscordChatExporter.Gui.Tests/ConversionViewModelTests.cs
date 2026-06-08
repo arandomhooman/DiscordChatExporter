@@ -127,6 +127,20 @@ public sealed class ConversionViewModelTests : IDisposable
     }
 
     [Fact]
+    public void Cancel_operation_command_cancels_the_active_conversion_token()
+    {
+        var viewModel = CreateViewModel();
+        var token = viewModel.BeginCancelableOperation();
+
+        viewModel.CancelOperationCommand.CanExecute(null).Should().BeTrue();
+        viewModel.CancelOperationCommand.Execute(null);
+
+        token.IsCancellationRequested.Should().BeTrue();
+        viewModel.CancelOperationCommand.CanExecute(null).Should().BeFalse();
+        viewModel.EndCancelableOperation();
+    }
+
+    [Fact]
     public async Task Convert_records_failed_source_and_continues_with_remaining_sources()
     {
         var badJson = Path.Combine(_dir, "bad.json");

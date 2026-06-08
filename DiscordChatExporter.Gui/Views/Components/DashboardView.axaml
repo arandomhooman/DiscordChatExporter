@@ -16,7 +16,7 @@
             Background="{DynamicResource MaterialDarkBackgroundBrush}"
             DockPanel.Dock="Top"
             Orientation="Vertical">
-            <Grid Margin="12,12,8,12" ColumnDefinitions="*,Auto,Auto,Auto">
+            <Grid Margin="12,12,8,12" ColumnDefinitions="*,Auto,Auto,Auto,Auto">
                 <materialStyles:Card Grid.Column="0">
                     <!--  Token  -->
                     <TextBox
@@ -100,6 +100,23 @@
                         Width="24"
                         Height="24"
                         Kind="Settings" />
+                </Button>
+
+                <!--  Cancel button  -->
+                <Button
+                    Grid.Column="4"
+                    Margin="8,0,0,0"
+                    Padding="8"
+                    VerticalAlignment="Center"
+                    Command="{Binding CancelOperationCommand}"
+                    Foreground="{DynamicResource MaterialValidationErrorBrush}"
+                    IsVisible="{Binding CanCancelOperation}"
+                    Theme="{DynamicResource MaterialFlatButton}"
+                    ToolTip.Tip="{Binding LocalizationManager.CancelButton}">
+                    <materialIcons:MaterialIcon
+                        Width="24"
+                        Height="24"
+                        Kind="StopCircleOutline" />
                 </Button>
             </Grid>
 

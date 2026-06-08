@@ -66,6 +66,7 @@ public partial class DashboardViewModel : ViewModelBase
 
     private ExportSetupViewModel? _lastExportSetup;
     private IReadOnlyList<Channel> _lastFailedChannels = [];
+    private CancellationTokenSource? _operationCancellation;
 
     public DashboardViewModel(
         ViewModelManager viewModelManager,
@@ -169,6 +170,25 @@ public partial class DashboardViewModel : ViewModelBase
     public bool HasProgressDisplay => HasProgressStatus || HasEta || IsRateLimitPaused;
 
     public LocalizationManager LocalizationManager { get; }
+
+    public bool CanCancelOperation => _operationCancellation is { IsCancellationRequested: false };
+
+    internal CancellationToken BeginCancelableOperation()
+    {
+        _operationCancellation?.Dispose();
+        _operationCancellation = new CancellationTokenSource();
+        OnPropertyChanged(nameof(CanCancelOperation));
+        CancelOperationCommand.NotifyCanExecuteChanged();
+        return _operationCancellation.Token;
+    }
+
+    internal void EndCancelableOperation()
+    {
+        _operationCancellation?.Dispose();
+        _operationCancellation = null;
+        OnPropertyChanged(nameof(CanCancelOperation));
+        CancelOperationCommand.NotifyCanExecuteChanged();
+    }
 
     internal static Task<T> RunContinuationWorkOffUiThreadAsync<T>(
         Func<ValueTask<T>> workAsync,
@@ -276,6 +296,14 @@ public partial class DashboardViewModel : ViewModelBase
 
     [RelayCommand(CanExecute = nameof(CanNavigate))]
     private void NavigateToConversion() => ConversionRequested?.Invoke(this, EventArgs.Empty);
+
+    [RelayCommand(CanExecute = nameof(CanCancelOperation))]
+    private void CancelOperation()
+    {
+        _operationCancellation?.Cancel();
+        OnPropertyChanged(nameof(CanCancelOperation));
+        CancelOperationCommand.NotifyCanExecuteChanged();
+    }
 
     private bool CanPullGuilds() => !IsBusy && !string.IsNullOrWhiteSpace(Token);
 
@@ -751,7 +779,8 @@ public partial class DashboardViewModel : ViewModelBase
 
     private async ValueTask CopyUserMessagesAsync(
         ExportSetupViewModel dialog,
-        ChannelExporter exporter
+        ChannelExporter exporter,
+        CancellationToken cancellationToken
     )
     {
         var channel = dialog.Channels!.Single();
@@ -779,9 +808,13 @@ public partial class DashboardViewModel : ViewModelBase
             );
 
             StartExportProgressRun(await EstimateMessageTotalsAsync([request]));
-            await exporter.ExportChannelAsync(request, CreateExportProgressInput(0, progress));
+            await exporter.ExportChannelAsync(
+                request,
+                CreateExportProgressInput(0, progress),
+                cancellationToken
+            );
 
-            var text = await File.ReadAllTextAsync(outputPath);
+            var text = await File.ReadAllTextAsync(outputPath, cancellationToken);
             var user = dialog.CopyUserMessagesUserValue?.Trim();
 
             if (text.Length > 0)
@@ -835,18 +868,24 @@ public partial class DashboardViewModel : ViewModelBase
                 return;
 
             var exporter = new ChannelExporter(_discord);
+            var cancellationToken = BeginCancelableOperation();
 
             if (dialog.ShouldCopyUserMessages)
             {
-                await CopyUserMessagesAsync(dialog, exporter);
+                await CopyUserMessagesAsync(dialog, exporter, cancellationToken);
                 return;
             }
 
             var channels = dialog.Channels!.ToArray();
-            var failed = await RunExportCoreAsync(exporter, dialog, channels);
+            var failed = await RunExportCoreAsync(exporter, dialog, channels, cancellationToken);
 
             _lastExportSetup = dialog;
             UpdateFailedChannels(failed);
+        }
+        catch (OperationCanceledException)
+            when (_operationCancellation?.IsCancellationRequested == true)
+        {
+            _snackbarManager.Notify(LocalizationManager.CancelButton);
         }
         catch (Exception ex)
         {
@@ -859,6 +898,7 @@ public partial class DashboardViewModel : ViewModelBase
         }
         finally
         {
+            EndCancelableOperation();
             IsBusy = false;
             EtaText = null;
         }
@@ -1021,7 +1061,8 @@ public partial class DashboardViewModel : ViewModelBase
     private async Task<IReadOnlyList<Channel>> RunExportCoreAsync(
         ChannelExporter exporter,
         ExportSetupViewModel dialog,
-        IReadOnlyList<Channel> channels
+        IReadOnlyList<Channel> channels,
+        CancellationToken cancellationToken
     )
     {
         var requests = channels
@@ -1049,6 +1090,8 @@ public partial class DashboardViewModel : ViewModelBase
 
         foreach (var r in requests)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var dir = r.Request.OutputDirPath;
             if (!manifestsByDir.TryGetValue(dir, out var manifest))
             {
@@ -1116,6 +1159,7 @@ public partial class DashboardViewModel : ViewModelBase
             new ParallelOptions
             {
                 MaxDegreeOfParallelism = Math.Max(1, _settingsService.ParallelLimit),
+                CancellationToken = cancellationToken,
             },
             async (pair, cancellationToken) =>
             {
@@ -1258,8 +1302,19 @@ public partial class DashboardViewModel : ViewModelBase
         try
         {
             var exporter = new ChannelExporter(_discord);
-            var failed = await RunExportCoreAsync(exporter, _lastExportSetup, _lastFailedChannels);
+            var cancellationToken = BeginCancelableOperation();
+            var failed = await RunExportCoreAsync(
+                exporter,
+                _lastExportSetup,
+                _lastFailedChannels,
+                cancellationToken
+            );
             UpdateFailedChannels(failed);
+        }
+        catch (OperationCanceledException)
+            when (_operationCancellation?.IsCancellationRequested == true)
+        {
+            _snackbarManager.Notify(LocalizationManager.CancelButton);
         }
         catch (Exception ex)
         {
@@ -1272,6 +1327,7 @@ public partial class DashboardViewModel : ViewModelBase
         }
         finally
         {
+            EndCancelableOperation();
             IsBusy = false;
             EtaText = null;
         }
@@ -1300,11 +1356,13 @@ public partial class DashboardViewModel : ViewModelBase
 
         try
         {
+            var cancellationToken = BeginCancelableOperation();
             var selectedChannelIds = selectedChannels.Select(c => c.Id).ToArray();
             var discovery = await ContinueExportDiscovery.ResolveAsync(
                 _settingsService.KnownExportDirs,
                 selectedChannelIds
             );
+            cancellationToken.ThrowIfCancellationRequested();
 
             var unresolved = discovery.Unresolved.ToList();
             IReadOnlyList<ResolvedContinueTarget> targets;
@@ -1312,7 +1370,8 @@ public partial class DashboardViewModel : ViewModelBase
             {
                 var pickedTarget = await ResolvePickedContinueTargetAsync(
                     selectedGuild,
-                    selectedChannelsById
+                    selectedChannelsById,
+                    cancellationToken
                 );
                 if (pickedTarget is null)
                     return;
@@ -1326,7 +1385,8 @@ public partial class DashboardViewModel : ViewModelBase
                     discovery.Resolved,
                     selectedGuild,
                     selectedChannelsById,
-                    unresolved
+                    unresolved,
+                    cancellationToken
                 );
             }
 
@@ -1375,7 +1435,7 @@ public partial class DashboardViewModel : ViewModelBase
                         cancellationToken
                     );
                 },
-                CancellationToken.None
+                cancellationToken
             );
 
             var message = FormatContinueSummary(summary, unresolved.Count);
@@ -1388,6 +1448,11 @@ public partial class DashboardViewModel : ViewModelBase
         {
             _snackbarManager.Notify(ex.Message.TrimEnd('.'));
         }
+        catch (OperationCanceledException)
+            when (_operationCancellation?.IsCancellationRequested == true)
+        {
+            _snackbarManager.Notify(LocalizationManager.CancelButton);
+        }
         catch (Exception ex)
         {
             var dialog = _viewModelManager.GetMessageBoxViewModel(
@@ -1398,6 +1463,7 @@ public partial class DashboardViewModel : ViewModelBase
         }
         finally
         {
+            EndCancelableOperation();
             IsBusy = false;
             EtaText = null;
         }
@@ -1412,21 +1478,25 @@ public partial class DashboardViewModel : ViewModelBase
         IReadOnlyList<ResolvedCatalogEntry> entries,
         Guild selectedGuild,
         IReadOnlyDictionary<Snowflake, Channel> selectedChannelsById,
-        ICollection<UnresolvedCatalogChannel> unresolved
+        ICollection<UnresolvedCatalogChannel> unresolved,
+        CancellationToken cancellationToken = default
     )
     {
         var targets = new List<ResolvedContinueTarget>();
 
         foreach (var entry in entries)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // The cutoff read happens up front, outside the per-channel export loop's isolation,
             // so a single empty or unreadable existing export (e.g. a JSON with no messages) must
             // not be allowed to abort the whole batch — skip that channel and continue.
             ContinuationCutoff cutoff;
             try
             {
-                cutoff = await RunContinuationWorkOffUiThreadAsync(() =>
-                    ContinuationFormat.ReadCutoffAsync(entry.FilePath)
+                cutoff = await RunContinuationWorkOffUiThreadAsync(
+                    () => ContinuationFormat.ReadCutoffAsync(entry.FilePath, cancellationToken),
+                    cancellationToken
                 );
             }
             catch (DiscordChatExporterException ex) when (!ex.IsFatal)
@@ -1471,12 +1541,14 @@ public partial class DashboardViewModel : ViewModelBase
 
     private async Task<ResolvedContinueTarget?> ResolvePickedContinueTargetAsync(
         Guild selectedGuild,
-        IReadOnlyDictionary<Snowflake, Channel> selectedChannelsById
+        IReadOnlyDictionary<Snowflake, Channel> selectedChannelsById,
+        CancellationToken cancellationToken = default
     )
     {
         var filePath = await _dialogManager.PromptSingleFilePathAsync(
             CreateContinueExportFileTypes()
         );
+        cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(filePath))
             return null;
 
@@ -1499,8 +1571,9 @@ public partial class DashboardViewModel : ViewModelBase
         ContinuationCutoff cutoff;
         try
         {
-            cutoff = await RunContinuationWorkOffUiThreadAsync(() =>
-                ContinuationFormat.ReadCutoffAsync(filePath)
+            cutoff = await RunContinuationWorkOffUiThreadAsync(
+                () => ContinuationFormat.ReadCutoffAsync(filePath, cancellationToken),
+                cancellationToken
             );
         }
         catch (DiscordChatExporterException ex) when (!ex.IsFatal)
@@ -1530,7 +1603,7 @@ public partial class DashboardViewModel : ViewModelBase
 
         var channel = selectedChannelsById.TryGetValue(cutoff.ChannelId, out var selectedChannel)
             ? selectedChannel
-            : await _discord!.GetChannelAsync(cutoff.ChannelId);
+            : await _discord!.GetChannelAsync(cutoff.ChannelId, cancellationToken);
 
         return new ResolvedContinueTarget(
             channel,

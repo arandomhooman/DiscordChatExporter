@@ -49,6 +49,10 @@
                     <Button Command="{Binding PickFilesCommand}" Content="{Binding LocalizationManager.ConversionPickFilesButtonText}" />
                     <Button Command="{Binding PickOutputFolderCommand}" Content="{Binding LocalizationManager.ConversionPickOutputFolderButtonText}" />
                     <Button Command="{Binding ConvertCommand}" Content="{Binding LocalizationManager.ConversionConvertButtonText}" />
+                    <Button
+                        Command="{Binding CancelOperationCommand}"
+                        Content="{Binding LocalizationManager.CancelButton}"
+                        IsVisible="{Binding CanCancelOperation}" />
                 </StackPanel>
 
                 <TextBlock FontWeight="SemiBold" Text="{Binding LocalizationManager.ConversionSourcesHeader}" />

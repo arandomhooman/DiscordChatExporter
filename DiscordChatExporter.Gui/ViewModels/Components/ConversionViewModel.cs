@@ -33,7 +33,10 @@ public sealed partial class ConversionViewModel(
         ?? (defaultDirPath => dialogManager.PromptDirectoryPathAsync(defaultDirPath));
 
     private const string ConvertedMessage = "Converted";
+    private const string CanceledMessage = "Canceled";
     private const string OutputPathConflictMessage = "Output path conflict";
+
+    private CancellationTokenSource? _operationCancellation;
 
     public LocalizationManager LocalizationManager { get; } = localizationManager;
 
@@ -42,6 +45,25 @@ public sealed partial class ConversionViewModel(
     public ObservableCollection<string> SourceFilePaths { get; } = [];
 
     public ObservableCollection<ConversionResultRow> Results { get; } = [];
+
+    public bool CanCancelOperation => _operationCancellation is { IsCancellationRequested: false };
+
+    internal CancellationToken BeginCancelableOperation()
+    {
+        _operationCancellation?.Dispose();
+        _operationCancellation = new CancellationTokenSource();
+        OnPropertyChanged(nameof(CanCancelOperation));
+        CancelOperationCommand.NotifyCanExecuteChanged();
+        return _operationCancellation.Token;
+    }
+
+    internal void EndCancelableOperation()
+    {
+        _operationCancellation?.Dispose();
+        _operationCancellation = null;
+        OnPropertyChanged(nameof(CanCancelOperation));
+        CancelOperationCommand.NotifyCanExecuteChanged();
+    }
 
     internal static Task<T> RunConversionWorkOffUiThreadAsync<T>(
         Func<ValueTask<T>> workAsync,
@@ -143,6 +165,7 @@ public sealed partial class ConversionViewModel(
 
         IsBusy = true;
         Results.Clear();
+        var cancellationToken = BeginCancelableOperation();
         try
         {
             var conversionJobs = CreateConversionJobs(
@@ -187,10 +210,15 @@ public sealed partial class ConversionViewModel(
                 try
                 {
                     hasConversionData = (
-                        await RunConversionWorkOffUiThreadAsync(() =>
-                            JsonExportReader.ParseAsync(sourcePath)
+                        await RunConversionWorkOffUiThreadAsync(
+                            () => JsonExportReader.ParseAsync(sourcePath, cancellationToken),
+                            cancellationToken
                         )
                     ).HasConversionDataBlock;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -215,12 +243,15 @@ public sealed partial class ConversionViewModel(
                 {
                     try
                     {
-                        await RunConversionWorkOffUiThreadAsync(() =>
-                            ExportConverter.ConvertAsync(
-                                job.SourceFilePath,
-                                job.OutputFilePath,
-                                job.Format
-                            )
+                        await RunConversionWorkOffUiThreadAsync(
+                            () =>
+                                ExportConverter.ConvertAsync(
+                                    job.SourceFilePath,
+                                    job.OutputFilePath,
+                                    job.Format,
+                                    cancellationToken
+                                ),
+                            cancellationToken
                         );
                         Results.Add(
                             new ConversionResultRow(
@@ -232,6 +263,10 @@ public sealed partial class ConversionViewModel(
                                 ConvertedMessage
                             )
                         );
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
                     }
                     catch (Exception ex)
                     {
@@ -249,10 +284,25 @@ public sealed partial class ConversionViewModel(
                 }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Results.Add(
+                new ConversionResultRow("", "", ExportFormat.Json, false, false, CanceledMessage)
+            );
+        }
         finally
         {
+            EndCancelableOperation();
             IsBusy = false;
         }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCancelOperation))]
+    private void CancelOperation()
+    {
+        _operationCancellation?.Cancel();
+        OnPropertyChanged(nameof(CanCancelOperation));
+        CancelOperationCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand(CanExecute = nameof(CanEditConversionState))]

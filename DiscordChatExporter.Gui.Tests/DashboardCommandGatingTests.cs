@@ -67,4 +67,18 @@ public sealed class DashboardCommandGatingTests
             .Should()
             .BeFalse("Export is also disabled with no channel — Continue must match it");
     }
+
+    [AvaloniaFact]
+    public void Cancel_operation_command_cancels_the_active_dashboard_token()
+    {
+        var vm = CreateViewModel();
+        var token = vm.BeginCancelableOperation();
+
+        vm.CancelOperationCommand.CanExecute(null).Should().BeTrue();
+        vm.CancelOperationCommand.Execute(null);
+
+        token.IsCancellationRequested.Should().BeTrue();
+        vm.CancelOperationCommand.CanExecute(null).Should().BeFalse();
+        vm.EndCancelableOperation();
+    }
 }
