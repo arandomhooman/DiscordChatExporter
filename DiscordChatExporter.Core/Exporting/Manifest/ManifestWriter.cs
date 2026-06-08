@@ -24,6 +24,13 @@ public static class ManifestWriter
         IReadOnlyList<ManifestEntry> newEntries,
         DateTimeOffset now,
         CancellationToken cancellationToken = default
+    ) => await UpdateAsync(dirPath, _ => newEntries, now, cancellationToken);
+
+    public static async ValueTask UpdateAsync(
+        string dirPath,
+        Func<ExportManifest?, IReadOnlyList<ManifestEntry>> createEntries,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default
     )
     {
         var manifestPath = Path.Combine(dirPath, ExportManifest.FileName);
@@ -51,6 +58,7 @@ public static class ManifestWriter
                 byFile[entry.File] = entry;
         }
 
+        var newEntries = createEntries(existing);
         foreach (var entry in newEntries)
             byFile[entry.File] = entry;
 

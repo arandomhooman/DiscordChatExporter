@@ -30,7 +30,8 @@ public sealed partial class ConversionViewModel(
         ExportFormat,
         CancellationToken,
         ValueTask<ExportResult>
-    >? convertParsedAsync = null
+    >? convertParsedAsync = null,
+    Func<string, bool>? outputFileExists = null
 ) : ViewModelBase
 {
     private readonly Func<
@@ -59,6 +60,7 @@ public sealed partial class ConversionViewModel(
                     convertAsync(sourceFilePath, outputFilePath, format, cancellationToken)
                 : ExportConverter.ConvertAsync
         );
+    private readonly Func<string, bool> _outputFileExists = outputFileExists ?? File.Exists;
 
     private const string ConvertedMessage = "Converted";
     private const string CanceledMessage = "Canceled";
@@ -196,25 +198,27 @@ public sealed partial class ConversionViewModel(
         var cancellationToken = BeginCancelableOperation();
         try
         {
-            var conversionJobs = CreateConversionJobs(
-                sourceFilePaths,
-                targetFormats,
-                outputFolderPath
+            var plan = await RunConversionWorkOffUiThreadAsync(
+                () =>
+                    ValueTask.FromResult(
+                        CreateConversionPlan(
+                            sourceFilePaths,
+                            targetFormats,
+                            outputFolderPath,
+                            _outputFileExists
+                        )
+                    ),
+                cancellationToken
             );
-            var conflictingOutputPaths = conversionJobs
-                .GroupBy(j => j.OutputFilePath, StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1 || File.Exists(g.Key))
-                .Select(g => g.Key)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var sourceJobs in conversionJobs.GroupBy(j => j.SourceIndex))
+            foreach (var sourceJobs in plan.Jobs.GroupBy(j => j.SourceIndex))
             {
                 var sourcePath = sourceJobs.First().SourceFilePath;
                 var conflictJobs = sourceJobs
-                    .Where(j => conflictingOutputPaths.Contains(j.OutputFilePath))
+                    .Where(j => plan.ConflictingOutputPaths.Contains(j.OutputFilePath))
                     .ToArray();
                 var remainingJobs = sourceJobs
-                    .Where(j => !conflictingOutputPaths.Contains(j.OutputFilePath))
+                    .Where(j => !plan.ConflictingOutputPaths.Contains(j.OutputFilePath))
                     .ToArray();
 
                 foreach (var job in conflictJobs)
@@ -387,6 +391,23 @@ public sealed partial class ConversionViewModel(
             .ToArray();
     }
 
+    private static ConversionPlan CreateConversionPlan(
+        IReadOnlyList<string> sourceFilePaths,
+        IReadOnlyList<ExportFormat> targetFormats,
+        string outputFolderPath,
+        Func<string, bool> outputFileExists
+    )
+    {
+        var conversionJobs = CreateConversionJobs(sourceFilePaths, targetFormats, outputFolderPath);
+        var conflictingOutputPaths = conversionJobs
+            .GroupBy(j => j.OutputFilePath, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1 || outputFileExists(g.Key))
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return new ConversionPlan(conversionJobs, conflictingOutputPaths);
+    }
+
     private static string GetOutputPath(
         string outputFolderPath,
         string sourcePath,
@@ -415,6 +436,11 @@ public sealed partial class ConversionViewModel(
         string SourceFilePath,
         string OutputFilePath,
         ExportFormat Format
+    );
+
+    private sealed record ConversionPlan(
+        IReadOnlyList<ConversionJob> Jobs,
+        IReadOnlySet<string> ConflictingOutputPaths
     );
 }
 

@@ -458,8 +458,17 @@ public partial class DashboardViewModel : ViewModelBase
         }
     }
 
+    private Channel[] GetSelectedExportableChannels() =>
+        SelectedChannels.Where(c => !c.Channel.IsCategory).Select(c => c.Channel).ToArray();
+
+    private bool HasSelectedExportableChannels() =>
+        SelectedChannels.Any(c => !c.Channel.IsCategory);
+
     private bool CanExport() =>
-        !IsBusy && _discord is not null && SelectedGuild is not null && SelectedChannels.Any();
+        !IsBusy
+        && _discord is not null
+        && SelectedGuild is not null
+        && HasSelectedExportableChannels();
 
     private static async ValueTask SetClipboardTextAsync(string text)
     {
@@ -741,13 +750,11 @@ public partial class DashboardViewModel : ViewModelBase
 
         try
         {
-            if (_discord is null || SelectedGuild is null || !SelectedChannels.Any())
+            var selectedChannels = GetSelectedExportableChannels();
+            if (_discord is null || SelectedGuild is null || selectedChannels.Length <= 0)
                 return;
 
-            var dialog = _viewModelManager.GetExportSetupViewModel(
-                SelectedGuild,
-                SelectedChannels.Select(c => c.Channel).ToArray()
-            );
+            var dialog = _viewModelManager.GetExportSetupViewModel(SelectedGuild, selectedChannels);
 
             if (await _dialogManager.ShowDialogAsync(dialog) != true)
                 return;
@@ -884,68 +891,76 @@ public partial class DashboardViewModel : ViewModelBase
                 return false;
 
             var fileName = Path.GetFileName(filePath);
-            var existing = await ManifestReader.TryReadAsync(
-                Path.Combine(dir, ExportManifest.FileName),
-                cancellationToken
-            );
-            var prior = existing?.Entries.FirstOrDefault(e =>
-                string.Equals(e.File, fileName, StringComparison.OrdinalIgnoreCase)
-            );
+            var wasUpdated = false;
+            await ManifestWriter.UpdateAsync(
+                dir,
+                existing =>
+                {
+                    var prior = existing?.Entries.FirstOrDefault(e =>
+                        string.Equals(e.File, fileName, StringComparison.OrdinalIgnoreCase)
+                    );
 
-            var info = new ManifestChannelInfo(
-                guild.Id.ToString(),
-                guild.Name,
-                channel.Id.ToString(),
-                channel.Name,
-                channel.Parent?.Name,
-                // Preserve the original format string (e.g. HtmlLight vs HtmlDark, which the file
-                // extension alone can't distinguish); fall back to the extension mapping.
-                prior?.Format
-                    ?? ContinuationFormat.FormatFor(filePath).ToString()
-            );
+                    var info = new ManifestChannelInfo(
+                        guild.Id.ToString(),
+                        guild.Name,
+                        channel.Id.ToString(),
+                        channel.Name,
+                        channel.Parent?.Name,
+                        // Preserve the original format string (e.g. HtmlLight vs HtmlDark, which
+                        // the file extension alone can't distinguish); fall back to extension map.
+                        prior?.Format
+                            ?? ContinuationFormat.FormatFor(filePath).ToString()
+                    );
 
-            var result = new ExportResult(
-                [new ExportedFile(filePath, messageCount, null, null, null, null)],
-                messageCount,
-                0
-            );
+                    var result = new ExportResult(
+                        [new ExportedFile(filePath, messageCount, null, null, null, null)],
+                        messageCount,
+                        0
+                    );
 
-            var entries = ManifestBuilder.Build(
-                info,
-                result,
+                    var entries = ManifestBuilder.Build(
+                        info,
+                        result,
+                        DateTimeOffset.Now,
+                        cancellationToken
+                    );
+                    if (entries.Count == 0)
+                        return [];
+
+                    // Continue doesn't re-scan the whole file, so carry the first-message metadata
+                    // forward from the prior entry rather than nulling it; count/size/hash above
+                    // are freshly read.
+                    if (prior is not null)
+                    {
+                        var appendedFile = appendedResult?.Files.LastOrDefault(file =>
+                            file.MessageCount > 0
+                        );
+                        var hasAppendedMessages = appendedResult?.MessageCount > 0;
+                        entries =
+                        [
+                            entries[0] with
+                            {
+                                FirstMessageId = prior.FirstMessageId,
+                                FirstMessageTimestamp = prior.FirstMessageTimestamp,
+                                LastMessageId = hasAppendedMessages
+                                    ? appendedFile?.LastMessageId?.ToString()
+                                    : prior.LastMessageId,
+                                LastMessageTimestamp = hasAppendedMessages
+                                    ? appendedFile?.LastMessageTimestamp
+                                    : prior.LastMessageTimestamp,
+                                AssetCount = prior.AssetCount,
+                            },
+                        ];
+                    }
+
+                    wasUpdated = true;
+                    return entries;
+                },
                 DateTimeOffset.Now,
                 cancellationToken
             );
-            if (entries.Count == 0)
-                return false;
 
-            // Continue doesn't re-scan the whole file, so carry the first-message metadata forward
-            // from the prior entry rather than nulling it; count/size/hash above are freshly read.
-            if (prior is not null)
-            {
-                var appendedFile = appendedResult?.Files.LastOrDefault(file =>
-                    file.MessageCount > 0
-                );
-                var hasAppendedMessages = appendedResult?.MessageCount > 0;
-                entries =
-                [
-                    entries[0] with
-                    {
-                        FirstMessageId = prior.FirstMessageId,
-                        FirstMessageTimestamp = prior.FirstMessageTimestamp,
-                        LastMessageId = hasAppendedMessages
-                            ? appendedFile?.LastMessageId?.ToString()
-                            : prior.LastMessageId,
-                        LastMessageTimestamp = hasAppendedMessages
-                            ? appendedFile?.LastMessageTimestamp
-                            : prior.LastMessageTimestamp,
-                        AssetCount = prior.AssetCount,
-                    },
-                ];
-            }
-
-            await ManifestWriter.WriteAsync(dir, entries, DateTimeOffset.Now, cancellationToken);
-            return true;
+            return wasUpdated;
         }
         catch (Exception ex)
             when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -1235,16 +1250,19 @@ public partial class DashboardViewModel : ViewModelBase
     // the Export FAB's slot whenever you're merely authenticated. Regressed twice now — see the
     // DashboardCommandGatingTests guard.
     private bool CanContinueExport() =>
-        !IsBusy && _discord is not null && SelectedGuild is not null && SelectedChannels.Any();
+        !IsBusy
+        && _discord is not null
+        && SelectedGuild is not null
+        && HasSelectedExportableChannels();
 
     [RelayCommand(CanExecute = nameof(CanContinueExport))]
     private async Task ContinueExportAsync()
     {
-        if (_discord is null || SelectedGuild is null || !SelectedChannels.Any())
+        var selectedChannels = GetSelectedExportableChannels();
+        if (_discord is null || SelectedGuild is null || selectedChannels.Length <= 0)
             return;
 
         var selectedGuild = SelectedGuild;
-        var selectedChannels = SelectedChannels.Select(c => c.Channel).ToArray();
         var selectedChannelsById = selectedChannels.ToDictionary(c => c.Id);
 
         IsBusy = true;

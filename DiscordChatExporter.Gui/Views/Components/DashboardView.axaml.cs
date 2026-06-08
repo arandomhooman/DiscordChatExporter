@@ -55,6 +55,9 @@ public partial class DashboardView : UserControl<DashboardViewModel>
         if (DataContext.SelectedChannels.Count != 1)
             return;
 
+        if (DataContext.SelectedChannels[0].Channel.IsCategory)
+            return;
+
         DataContext.ExportCommand.ExecuteIfCan(null);
     }
 }

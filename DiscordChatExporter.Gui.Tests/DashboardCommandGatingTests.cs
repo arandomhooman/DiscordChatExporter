@@ -88,6 +88,19 @@ public sealed class DashboardCommandGatingTests
     }
 
     [AvaloniaFact]
+    public void Export_commands_are_disabled_when_only_a_category_is_selected()
+    {
+        var vm = CreateViewModel();
+        Authenticate(vm);
+        vm.SelectedChannels.Add(
+            new ChannelConnection(CreateChannel(10, ChannelKind.GuildCategory), [])
+        );
+
+        vm.ExportCommand.CanExecute(null).Should().BeFalse();
+        vm.ContinueExportCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [AvaloniaFact]
     public void Cancel_operation_command_cancels_the_active_dashboard_token()
     {
         var vm = CreateViewModel();

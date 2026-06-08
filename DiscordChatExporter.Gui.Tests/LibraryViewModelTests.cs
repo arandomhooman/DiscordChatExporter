@@ -40,6 +40,24 @@ public sealed class LibraryViewModelTests
     }
 
     [Fact]
+    public void Search_is_disabled_while_the_library_is_busy()
+    {
+        var viewModel = new LibraryViewModel(
+            new SettingsService(),
+            new DialogManager(),
+            new SnackbarManager(),
+            new LocalizationManager(new SettingsService()),
+            () => { }
+        )
+        {
+            HasSearchableExports = true,
+            IsBusy = true,
+        };
+
+        viewModel.SearchCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Scan_folder_reports_settings_save_failure_without_throwing()
     {
         var dir = Path.Combine(

@@ -151,14 +151,16 @@ public sealed class ConversionViewModelTests : IDisposable
             ExportFormat,
             CancellationToken,
             ValueTask<ExportResult>
-        >? convertParsedAsync = null
+        >? convertParsedAsync = null,
+        Func<string, bool>? outputFileExists = null
     ) =>
         new(
             new DialogManager(),
             new LocalizationManager(new SettingsService()),
             convertAsync: convertAsync,
             parseAsync: parseAsync,
-            convertParsedAsync: convertParsedAsync
+            convertParsedAsync: convertParsedAsync,
+            outputFileExists: outputFileExists
         )
         {
             OutputFolderPath = _dir,
@@ -176,6 +178,25 @@ public sealed class ConversionViewModelTests : IDisposable
             ranOnUiThread = Dispatcher.UIThread.CheckAccess();
             return ValueTask.FromResult(42);
         });
+
+        ranOnUiThread.Should().BeFalse();
+    }
+
+    [AvaloniaFact]
+    public async Task Output_conflict_checks_run_off_the_ui_thread()
+    {
+        Dispatcher.UIThread.CheckAccess().Should().BeTrue();
+        var json = WriteJson("chat.json", "from json");
+        var ranOnUiThread = true;
+        var viewModel = CreateViewModel(outputFileExists: _ =>
+        {
+            ranOnUiThread = Dispatcher.UIThread.CheckAccess();
+            return false;
+        });
+        viewModel.IsCsvSelected = true;
+        viewModel.SourceFilePaths.Add(json);
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
 
         ranOnUiThread.Should().BeFalse();
     }

@@ -78,6 +78,7 @@ public partial class LibraryViewModel : ViewModelBase
     public partial bool HasSearchableExports { get; set; }
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SearchCommand))]
     public partial bool IsBusy { get; set; }
 
     // Empty-state flags, kept mutually exclusive so only one hint ever renders:
@@ -156,11 +157,14 @@ public partial class LibraryViewModel : ViewModelBase
         await ReloadAsync(_settingsService.KnownExportDirs);
     }
 
-    private bool CanSearch() => HasSearchableExports;
+    private bool CanSearch() => HasSearchableExports && !IsBusy;
 
     [RelayCommand(CanExecute = nameof(CanSearch))]
     private async Task SearchAsync()
     {
+        if (IsBusy)
+            return;
+
         SearchResults.Clear();
         ShowNoResults = false;
 

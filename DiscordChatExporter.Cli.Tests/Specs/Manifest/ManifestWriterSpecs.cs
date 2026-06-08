@@ -108,6 +108,29 @@ public class ManifestWriterSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Updating_exposes_the_existing_manifest_to_the_entry_factory()
+    {
+        await ManifestWriter.WriteAsync(_dir, [Entry("a.json", 1)], DateTimeOffset.UnixEpoch);
+        var sawExistingEntry = false;
+
+        await ManifestWriter.UpdateAsync(
+            _dir,
+            existing =>
+            {
+                sawExistingEntry = existing?.Entries.Single().MessageCount == 1;
+                return [Entry("a.json", 2)];
+            },
+            DateTimeOffset.UnixEpoch
+        );
+
+        sawExistingEntry.Should().BeTrue();
+        var manifest = await ManifestReader.TryReadAsync(
+            Path.Combine(_dir, ExportManifest.FileName)
+        );
+        manifest!.Entries.Single(e => e.File == "a.json").MessageCount.Should().Be(2);
+    }
+
+    [Fact]
     public async Task Writing_over_an_existing_manifest_cleans_up_the_backup()
     {
         await ManifestWriter.WriteAsync(_dir, [Entry("a.json", 1)], DateTimeOffset.UnixEpoch);
