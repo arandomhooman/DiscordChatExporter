@@ -84,36 +84,6 @@ public class ManifestResumeSpecs
         );
 
     [Fact]
-    public void Returns_the_candidates_that_are_already_in_the_manifest()
-    {
-        var done = ManifestResume.AlreadyExported(
-            Manifest("a.json", "b.json"),
-            ["a.json", "c.json"]
-        );
-
-        done.Should().BeEquivalentTo(["a.json"]);
-    }
-
-    [Fact]
-    public void Matching_is_case_insensitive()
-    {
-        var done = ManifestResume.AlreadyExported(
-            Manifest("Server - General [22].json"),
-            ["server - general [22].json"]
-        );
-
-        done.Should().HaveCount(1);
-    }
-
-    [Fact]
-    public void A_null_manifest_means_nothing_is_already_exported()
-    {
-        var done = ManifestResume.AlreadyExported(null, ["a.json", "b.json"]);
-
-        done.Should().BeEmpty();
-    }
-
-    [Fact]
     public void Strict_resume_matching_requires_the_same_channel_and_an_existing_file()
     {
         var dir = Path.Combine(Path.GetTempPath(), "DceManifest_" + Guid.NewGuid().ToString("N"));

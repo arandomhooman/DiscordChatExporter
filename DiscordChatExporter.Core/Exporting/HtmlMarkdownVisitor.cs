@@ -377,9 +377,6 @@ internal partial class HtmlMarkdownVisitor
 
     private static bool IsSafeHtmlAssetUrl(string url)
     {
-        if (Path.IsPathFullyQualified(url))
-            return true;
-
         if (!Uri.TryCreate(url, UriKind.RelativeOrAbsolute, out var uri))
             return false;
 

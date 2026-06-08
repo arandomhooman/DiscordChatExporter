@@ -49,8 +49,6 @@ public static class JsonExportInspector
         Snowflake? firstId = null;
         Snowflake? lastId = null;
         Snowflake? previousId = null;
-        DateTimeOffset? firstTs = null;
-        DateTimeOffset? lastTs = null;
         var orderDirection = 0;
         long count = 0;
 
@@ -82,12 +80,8 @@ public static class JsonExportInspector
                         var (id, ts) = ReadMessageHeader(ref reader);
                         TrackMessageOrder(previousId, id, ref orderDirection);
                         firstId ??= id;
-                        firstTs ??= ts;
                         lastId = id;
                         previousId = id;
-                        // Keep the last *non-null* timestamp so a message that lacks one
-                        // doesn't clobber a good cutoff and skew the chronological check.
-                        lastTs = ts ?? lastTs;
                         count++;
                     }
                     break;
