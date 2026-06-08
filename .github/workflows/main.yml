@@ -57,6 +57,12 @@ jobs:
     permissions:
       contents: read
 
+    # Set secrets as job-level env so steps can be gated on their presence (secrets can't be used
+    # directly in `if:`). On a fork without these secrets the gated steps simply skip, keeping CI green.
+    env:
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -80,9 +86,7 @@ jobs:
           --logger "GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true"
 
       - name: Run live-token CLI tests
-        if: ${{ github.event_name != 'pull_request' }}
-        env:
-          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        if: ${{ github.event_name != 'pull_request' && env.DISCORD_TOKEN != '' }}
         run: >
           dotnet test DiscordChatExporter.Cli.Tests
           -p:CSharpier_Bypass=true
@@ -94,7 +98,7 @@ jobs:
           DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
       - name: Upload coverage
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'pull_request' && env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -248,8 +252,12 @@ jobs:
     permissions:
       contents: read
 
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
     steps:
       - name: Notify Discord
+        if: ${{ env.DISCORD_WEBHOOK != '' }}
         uses: tyrrrz/action-http-request@110f1a0f0f7e91c3b2de349539249f4573c243fa # 1.1.5
         with:
           url: ${{ secrets.DISCORD_WEBHOOK }}
