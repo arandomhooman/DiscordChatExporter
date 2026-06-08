@@ -25,6 +25,12 @@ public class UpdateService : IDisposable
         _updateManager = updateManager;
     }
 
+    private void ClearPreparedUpdate()
+    {
+        _updateVersion = null;
+        _isUpdatePrepared = false;
+    }
+
     private static IUpdateManager? CreateDefaultUpdateManager() =>
         OperatingSystem.IsWindows() && StartOptions.Current.IsAutoUpdateAllowed
             ? new UpdateManager(
@@ -55,6 +61,8 @@ public class UpdateService : IDisposable
 
     public async ValueTask<bool> PrepareUpdateAsync(Version version)
     {
+        ClearPreparedUpdate();
+
         if (_updateManager is null)
             return false;
 

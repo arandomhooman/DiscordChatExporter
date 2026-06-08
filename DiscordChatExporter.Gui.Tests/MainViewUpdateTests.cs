@@ -70,6 +70,45 @@ public sealed class MainViewUpdateTests
         public void Dispose() { }
     }
 
+    private sealed class FailingSecondPrepareUpdateManager : IUpdateManager
+    {
+        private int _prepareAttemptCount;
+
+        public List<Version> LaunchedVersions { get; } = [];
+
+        public AssemblyMetadata Updatee { get; } =
+            new("DiscordChatExporter", new Version(1, 0), "DiscordChatExporter.exe");
+
+        public bool IsUpdatePrepared(Version version) => _prepareAttemptCount == 1;
+
+        public IReadOnlyList<Version> GetPreparedUpdates() => [];
+
+        public Task<CheckForUpdatesResult> CheckForUpdatesAsync(
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new CheckForUpdatesResult([], null, false));
+
+        public Task PrepareUpdateAsync(
+            Version version,
+            IProgress<double>? progress = null,
+            CancellationToken cancellationToken = default
+        )
+        {
+            _prepareAttemptCount++;
+            if (_prepareAttemptCount > 1)
+                throw new IOException("prepare failed");
+
+            return Task.CompletedTask;
+        }
+
+        public void LaunchUpdater(
+            Version version,
+            bool needRestart = false,
+            string? executablePath = null
+        ) => LaunchedVersions.Add(version);
+
+        public void Dispose() { }
+    }
+
     private static ServiceProvider BuildServices(RecordingSnackbarManager snackbarManager)
     {
         var services = new ServiceCollection();
@@ -116,5 +155,22 @@ public sealed class MainViewUpdateTests
         snackbarManager.Messages.Should().Contain(localizationManager.UpdateFailedMessage);
         snackbarManager.Messages.Should().NotContain(localizationManager.UpdateReadyMessage);
         snackbarManager.ActionNotificationCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Failed_update_prepare_clears_previous_prepared_update()
+    {
+        var settingsService = new SettingsService { IsAutoUpdateEnabled = true };
+        var updateManager = new FailingSecondPrepareUpdateManager();
+        var updateService = new UpdateService(settingsService, updateManager);
+
+        (await updateService.PrepareUpdateAsync(new Version(2, 0))).Should().BeTrue();
+        await FluentActions
+            .Awaiting(() => updateService.PrepareUpdateAsync(new Version(3, 0)).AsTask())
+            .Should()
+            .ThrowAsync<IOException>();
+
+        updateService.FinalizeUpdate(false).Should().BeFalse();
+        updateManager.LaunchedVersions.Should().BeEmpty();
     }
 }
