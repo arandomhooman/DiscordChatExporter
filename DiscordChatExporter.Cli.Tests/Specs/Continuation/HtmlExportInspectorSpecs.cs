@@ -216,10 +216,10 @@ public class HtmlExportInspectorSpecs
     [Fact]
     public async Task I_cannot_continue_a_before_bounded_html_export_without_exact_bound_metadata()
     {
-        var path = await WriteAsync(
-            HtmlSample.Export([1000L, 2000L]),
-            "Guild - general (before 2026-01-01)"
-        );
+        var dir = Path.Combine(Path.GetTempPath(), $"DceHtmlBeforeBound_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "Guild - general [222] (before 2026-01-01).html");
+        await File.WriteAllTextAsync(path, HtmlSample.Export([1000L, 2000L]));
         try
         {
             var act = async () => await HtmlExportInspector.InspectAsync(path);
@@ -227,7 +227,7 @@ public class HtmlExportInspectorSpecs
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(dir, true);
         }
     }
 }

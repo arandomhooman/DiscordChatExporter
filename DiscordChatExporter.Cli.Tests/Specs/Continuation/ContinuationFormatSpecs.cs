@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Continuation;
 using FluentAssertions;
 using Xunit;
@@ -14,11 +15,32 @@ public class ContinuationFormatSpecs
     [InlineData("x.html", true)]
     [InlineData("x.htm", true)]
     [InlineData("x.csv", true)]
+    [InlineData("x.db", true)]
     [InlineData("x.txt", false)]
     [InlineData("x.xml", false)]
     public void It_recognizes_supported_extensions(string path, bool supported)
     {
         ContinuationFormat.IsSupportedExtension(path).Should().Be(supported);
+    }
+
+    [Theory]
+    [InlineData("x.json", ExportFormat.Json)]
+    [InlineData("x.html", ExportFormat.HtmlDark)]
+    [InlineData("x.htm", ExportFormat.HtmlDark)]
+    [InlineData("x.csv", ExportFormat.Csv)]
+    [InlineData("x.db", ExportFormat.Db)]
+    public void It_maps_supported_extensions_to_export_formats(
+        string path,
+        ExportFormat expectedFormat
+    )
+    {
+        ContinuationFormat.FormatFor(path).Should().Be(expectedFormat);
+    }
+
+    [Fact]
+    public void Invalid_json_export_errors_are_invalid_export_errors()
+    {
+        new InvalidJsonExportException("bad").Should().BeAssignableTo<InvalidExportException>();
     }
 
     [Fact]

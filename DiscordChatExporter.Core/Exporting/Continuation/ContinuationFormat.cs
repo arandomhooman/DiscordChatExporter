@@ -8,41 +8,49 @@ namespace DiscordChatExporter.Core.Exporting.Continuation;
 
 public static class ContinuationFormat
 {
-    public static bool IsSupportedExtension(string filePath) =>
-        Path.GetExtension(filePath).ToLowerInvariant()
-            is ".json"
-                or ".html"
-                or ".htm"
-                or ".csv"
-                or ".db";
+    private static string GetExtension(string filePath) =>
+        Path.GetExtension(filePath).ToLowerInvariant();
 
-    public static ExportFormat FormatFor(string filePath) =>
-        Path.GetExtension(filePath).ToLowerInvariant() switch
+    private static ExportFormat? TryGetFormatForExtension(string extension) =>
+        extension switch
         {
             ".json" => ExportFormat.Json,
             ".html" or ".htm" => ExportFormat.HtmlDark,
             ".csv" => ExportFormat.Csv,
             ".db" => ExportFormat.Db,
-            var ext => throw new InvalidExportException(
-                $"Continuing {ext} exports is not supported."
-            ),
+            _ => null,
         };
+
+    private static InvalidExportException UnsupportedExtension(string extension) =>
+        new($"Continuing {extension} exports is not supported.");
+
+    public static bool IsSupportedExtension(string filePath) =>
+        TryGetFormatForExtension(GetExtension(filePath)) is not null;
+
+    public static ExportFormat FormatFor(string filePath)
+    {
+        var extension = GetExtension(filePath);
+        return TryGetFormatForExtension(extension) ?? throw UnsupportedExtension(extension);
+    }
 
     public static async ValueTask<ContinuationCutoff> ReadCutoffAsync(
         string filePath,
         CancellationToken cancellationToken = default
     ) =>
-        Path.GetExtension(filePath).ToLowerInvariant() switch
+        FormatFor(filePath) switch
         {
-            ".json" => await ReadJsonAsync(filePath, cancellationToken),
-            ".html" or ".htm" => await HtmlExportInspector.InspectAsync(
+            ExportFormat.Json => await ReadJsonAsync(filePath, cancellationToken),
+            ExportFormat.HtmlDark => await HtmlExportInspector.InspectAsync(
                 filePath,
                 cancellationToken
             ),
-            ".csv" => await CsvExportInspector.InspectAsync(filePath, cancellationToken),
-            ".db" => await SqliteExportInspector.InspectAsync(filePath, cancellationToken),
-            var ext => throw new InvalidExportException(
-                $"Continuing {ext} exports is not supported."
+            ExportFormat.Csv => await CsvExportInspector.InspectAsync(filePath, cancellationToken),
+            ExportFormat.Db => await SqliteExportInspector.InspectAsync(
+                filePath,
+                cancellationToken
+            ),
+            var format => throw new InvalidExportException(
+                $"Continuing {format} exports is not supported."
             ),
         };
 
@@ -53,15 +61,15 @@ public static class ContinuationFormat
         DateTimeOffset exportedAt,
         CancellationToken cancellationToken = default
     ) =>
-        Path.GetExtension(existingFilePath).ToLowerInvariant() switch
+        FormatFor(existingFilePath) switch
         {
-            ".json" => await JsonExportMerger.MergeAsync(
+            ExportFormat.Json => await JsonExportMerger.MergeAsync(
                 existingFilePath,
                 newMessagesFilePath,
                 exportedAt,
                 cancellationToken
             ),
-            ".html" or ".htm" => await HtmlExportMerger.MergeAsync(
+            ExportFormat.HtmlDark => await HtmlExportMerger.MergeAsync(
                 existingFilePath,
                 newMessagesFilePath,
                 cutoff,
@@ -71,31 +79,31 @@ public static class ContinuationFormat
             // recompute, unlike Json/Html). The dispatcher contract is "return the merged TOTAL",
             // so add the existing data-row count back on to keep parity with the other formats and
             // make the consumer's (total - ExistingCount) added-count come out right.
-            ".csv" => cutoff.ExistingCount
+            ExportFormat.Csv => cutoff.ExistingCount
                 + await CsvExportMerger.MergeAsync(
                     existingFilePath,
                     newMessagesFilePath,
                     cutoff,
                     cancellationToken
                 ),
-            ".db" => await SqliteExportMerger.MergeAsync(
+            ExportFormat.Db => await SqliteExportMerger.MergeAsync(
                 existingFilePath,
                 newMessagesFilePath,
                 cutoff,
                 exportedAt,
                 cancellationToken
             ),
-            var ext => throw new InvalidExportException(
-                $"Continuing {ext} exports is not supported."
+            var format => throw new InvalidExportException(
+                $"Continuing {format} exports is not supported."
             ),
         };
 
     private static async ValueTask<ContinuationCutoff> ReadJsonAsync(
         string filePath,
-        CancellationToken ct
+        CancellationToken cancellationToken
     )
     {
-        var info = await JsonExportInspector.InspectAsync(filePath, ct);
+        var info = await JsonExportInspector.InspectAsync(filePath, cancellationToken);
         return new ContinuationCutoff(
             info.ChannelId,
             info.LastMessageId,
