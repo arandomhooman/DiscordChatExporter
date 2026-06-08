@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
@@ -10,6 +12,16 @@ namespace DiscordChatExporter.Core.Exporting.Continuation;
 
 public static class SqliteExportInspector
 {
+    private static readonly string[] RequiredTableNames =
+    [
+        "export_info",
+        "authors",
+        "messages",
+        "attachments",
+        "reactions",
+        "messages_fts",
+    ];
+
     public static async ValueTask<ContinuationCutoff> InspectAsync(
         string filePath,
         CancellationToken cancellationToken = default
@@ -54,9 +66,7 @@ public static class SqliteExportInspector
             await using (var messages = connection.CreateCommand())
             {
                 messages.CommandText =
-                    "SELECT COUNT(*), "
-                    + "(SELECT id FROM messages ORDER BY CAST(id AS INTEGER) DESC LIMIT 1) "
-                    + "FROM messages;";
+                    "SELECT COUNT(*), CAST(MAX(CAST(id AS INTEGER)) AS TEXT) FROM messages;";
                 await using var reader = await messages.ExecuteReaderAsync(cancellationToken);
                 await reader.ReadAsync(cancellationToken);
                 count = reader.GetInt64(0);
@@ -109,29 +119,28 @@ public static class SqliteExportInspector
         CancellationToken cancellationToken
     )
     {
-        foreach (
-            var tableName in new[]
-            {
-                "export_info",
-                "authors",
-                "messages",
-                "attachments",
-                "reactions",
-                "messages_fts",
-            }
-        )
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText =
-                "SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('table', 'virtual table') AND name = $name;";
-            command.Parameters.AddWithValue("$name", tableName);
+        var missingTableNames = new HashSet<string>(
+            RequiredTableNames,
+            StringComparer.OrdinalIgnoreCase
+        );
 
-            if ((long)(await command.ExecuteScalarAsync(cancellationToken))! <= 0)
-            {
-                throw new InvalidExportException(
-                    $"The SQLite export is missing the required '{tableName}' table."
-                );
-            }
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT name
+            FROM sqlite_schema
+            WHERE type IN ('table', 'virtual table')
+              AND name IN ('export_info', 'authors', 'messages', 'attachments', 'reactions', 'messages_fts');
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            missingTableNames.Remove(reader.GetString(0));
+
+        if (missingTableNames.Count > 0)
+        {
+            throw new InvalidExportException(
+                $"The SQLite export is missing the required '{missingTableNames.First()}' table."
+            );
         }
     }
 
