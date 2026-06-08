@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using DiscordChatExporter.Gui.ViewModels;
@@ -11,6 +15,9 @@ namespace DiscordChatExporter.Gui.Framework;
 
 public partial class ViewManager
 {
+    private readonly object _initializationLock = new();
+    private readonly HashSet<ViewModelBase> _initializedViewModels = [];
+
     private Control? TryCreateView(ViewModelBase viewModel) =>
         viewModel switch
         {
@@ -24,6 +31,24 @@ public partial class ViewManager
             _ => null,
         };
 
+    internal async Task InitializeViewModelOnceAsync(ViewModelBase viewModel)
+    {
+        lock (_initializationLock)
+        {
+            if (!_initializedViewModels.Add(viewModel))
+                return;
+        }
+
+        try
+        {
+            await viewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+        }
+    }
+
     public Control? TryBindView(ViewModelBase viewModel)
     {
         var view = TryCreateView(viewModel);
@@ -31,7 +56,7 @@ public partial class ViewManager
             return null;
 
         view.DataContext ??= viewModel;
-        view.Loaded += async (_, _) => await viewModel.InitializeAsync();
+        view.Loaded += async (_, _) => await InitializeViewModelOnceAsync(viewModel);
 
         return view;
     }
