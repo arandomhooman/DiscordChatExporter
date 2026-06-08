@@ -15,6 +15,23 @@ public static class SqliteExportMerger
         ContinuationCutoff cutoff,
         DateTimeOffset exportedAt,
         CancellationToken cancellationToken = default
+    ) =>
+        await MergeAsync(
+            existingDatabaseFilePath,
+            newDatabaseFilePath,
+            cutoff,
+            exportedAt,
+            beforeDetachAsync: null,
+            cancellationToken
+        );
+
+    internal static async ValueTask<long> MergeAsync(
+        string existingDatabaseFilePath,
+        string newDatabaseFilePath,
+        ContinuationCutoff cutoff,
+        DateTimeOffset exportedAt,
+        Func<ValueTask>? beforeDetachAsync,
+        CancellationToken cancellationToken = default
     )
     {
         try
@@ -93,9 +110,12 @@ public static class SqliteExportMerger
             }
             finally
             {
+                if (beforeDetachAsync is not null)
+                    await beforeDetachAsync();
+
                 await using var detach = connection.CreateCommand();
                 detach.CommandText = "DETACH DATABASE incoming;";
-                await detach.ExecuteNonQueryAsync(cancellationToken);
+                await detach.ExecuteNonQueryAsync(CancellationToken.None);
             }
 
             await using (var count = connection.CreateCommand())

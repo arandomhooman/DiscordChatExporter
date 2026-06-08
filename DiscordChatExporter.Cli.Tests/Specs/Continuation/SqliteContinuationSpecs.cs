@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
@@ -310,6 +311,53 @@ public class SqliteContinuationSpecs : IDisposable
         (await File.ReadAllBytesAsync(existing)).Should().Equal(existingBefore);
         File.Exists(existing + ".merging.tmp").Should().BeFalse();
         File.Exists(existing + ".bak").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Merger_cleanup_does_not_mask_primary_failure_with_cancellation()
+    {
+        var existing = await WriteDbAsync("chat.db", (1001, "old"));
+        var incoming = await WriteDbAsync("new.db", (1002, "new"));
+        await ExecuteNonQueryAsync(incoming, "DROP TABLE messages_fts;");
+        var cutoff = await SqliteExportInspector.InspectAsync(existing);
+        using var cancellation = new CancellationTokenSource();
+
+        var act = async () =>
+            await SqliteExportMerger.MergeAsync(
+                existing,
+                incoming,
+                cutoff,
+                DateTimeOffset.UnixEpoch,
+                beforeDetachAsync: () =>
+                {
+                    cancellation.Cancel();
+                    return ValueTask.CompletedTask;
+                },
+                cancellationToken: cancellation.Token
+            );
+
+        await act.Should().ThrowAsync<InvalidExportException>();
+    }
+
+    [Fact]
+    public async Task Merger_propagates_user_cancellation()
+    {
+        var existing = await WriteDbAsync("chat.db", (1001, "old"));
+        var incoming = await WriteDbAsync("new.db", (1002, "new"));
+        var cutoff = await SqliteExportInspector.InspectAsync(existing);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var act = async () =>
+            await SqliteExportMerger.MergeAsync(
+                existing,
+                incoming,
+                cutoff,
+                DateTimeOffset.UnixEpoch,
+                cancellation.Token
+            );
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
