@@ -62,14 +62,7 @@ public static class JsonExportReader
             var (after, before) = root.TryGetProperty("dateRange", out var dateRangeJson)
                 ? ParseDateRange(dateRangeJson)
                 : (null, null);
-            var messages = RelinkReferencedMessages(
-                messagesJson.EnumerateArray().Select(ParseMessage).ToArray()
-            );
-            var inlineEmojis = messagesJson
-                .EnumerateArray()
-                .SelectMany(ParseInlineEmojis)
-                .DistinctBy(emoji => (emoji.Id, emoji.Name, emoji.IsAnimated))
-                .ToArray();
+            var (messages, inlineEmojis) = ParseMessages(messagesJson);
             var hasConversionDataBlock = root.TryGetProperty(
                 "conversionData",
                 out var conversionDataJson
@@ -399,22 +392,43 @@ public static class JsonExportReader
             GetAssetUrl(json, "imageUrl")
         );
 
-    private static IReadOnlyList<ConversionEmoji> ParseInlineEmojis(JsonElement json)
+    private static (
+        IReadOnlyList<Message> Messages,
+        IReadOnlyList<ConversionEmoji> InlineEmojis
+    ) ParseMessages(JsonElement json)
     {
-        var emojis = new List<ConversionEmoji>();
+        var messages = new List<Message>();
+        var inlineEmojis = new List<ConversionEmoji>();
 
-        emojis.AddRange(ParseArray(json, "inlineEmojis", ParseConversionEmoji));
+        foreach (var messageJson in json.EnumerateArray())
+        {
+            messages.Add(ParseMessage(messageJson));
+            AddInlineEmojis(messageJson, inlineEmojis);
+        }
+
+        return (
+            RelinkReferencedMessages(messages),
+            inlineEmojis.DistinctBy(emoji => (emoji.Id, emoji.Name, emoji.IsAnimated)).ToArray()
+        );
+    }
+
+    private static void AddInlineEmojis(JsonElement json, ICollection<ConversionEmoji> emojis)
+    {
+        foreach (var emojiJson in EnumerateArray(json, "inlineEmojis"))
+        {
+            var emoji = ParseConversionEmoji(emojiJson);
+            if (!string.IsNullOrWhiteSpace(emoji.ImageUrl))
+                emojis.Add(emoji);
+        }
 
         if (json.TryGetProperty("referencedMessage", out var referencedMessage))
-            emojis.AddRange(ParseInlineEmojis(referencedMessage));
+            AddInlineEmojis(referencedMessage, emojis);
 
         if (json.TryGetProperty("forwardedMessage", out var forwardedMessage))
-            emojis.AddRange(ParseInlineEmojis(forwardedMessage));
+            AddInlineEmojis(forwardedMessage, emojis);
 
-        foreach (var embed in ParseArray(json, "embeds", embed => embed))
-            emojis.AddRange(ParseArray(embed, "inlineEmojis", ParseConversionEmoji));
-
-        return emojis.Where(emoji => !string.IsNullOrWhiteSpace(emoji.ImageUrl)).ToArray();
+        foreach (var embed in EnumerateArray(json, "embeds"))
+            AddInlineEmojis(embed, emojis);
     }
 
     private static ConversionData? MergeConversionData(
@@ -475,10 +489,21 @@ public static class JsonExportReader
         JsonElement json,
         string propertyName,
         Func<JsonElement, T> parse
-    ) =>
-        json.TryGetProperty(propertyName, out var array) && array.ValueKind == JsonValueKind.Array
-            ? array.EnumerateArray().Select(parse).ToArray()
-            : [];
+    ) => EnumerateArray(json, propertyName).Select(parse).ToArray();
+
+    private static IEnumerable<JsonElement> EnumerateArray(JsonElement json, string propertyName)
+    {
+        if (
+            !json.TryGetProperty(propertyName, out var array)
+            || array.ValueKind != JsonValueKind.Array
+        )
+        {
+            yield break;
+        }
+
+        foreach (var item in array.EnumerateArray())
+            yield return item;
+    }
 
     private static Snowflake ParseSnowflake(JsonElement json) => ParseSnowflake(GetString(json));
 

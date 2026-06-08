@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
+using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exporting.Continuation;
 using DiscordChatExporter.Core.Exporting.Filtering;
 using DiscordChatExporter.Core.Exporting.Partitioning;
@@ -11,6 +13,11 @@ namespace DiscordChatExporter.Core.Exporting.Conversion;
 
 public static class ExportConverter
 {
+    private sealed record MessageWithReferencedUsers(
+        Message Message,
+        IReadOnlyList<User> ReferencedUsers
+    );
+
     public static async ValueTask<ExportResult> ConvertAsync(
         string jsonFilePath,
         string outputFilePath,
@@ -42,7 +49,16 @@ public static class ExportConverter
         if (targetFormat is ExportFormat.Json)
             throw new InvalidExportException("JSON is not a supported conversion target.");
 
-        var referencedUsers = parsed.Messages.SelectMany(m => m.GetReferencedUsers()).ToArray();
+        var messagesWithReferencedUsers = parsed
+            .Messages.Select(message => new MessageWithReferencedUsers(
+                message,
+                message.GetReferencedUsers().DistinctBy(user => user.Id).ToArray()
+            ))
+            .ToArray();
+        var referencedUsers = messagesWithReferencedUsers
+            .SelectMany(message => message.ReferencedUsers)
+            .DistinctBy(user => user.Id)
+            .ToArray();
         var request = new ExportRequest(
             parsed.Guild,
             parsed.Channel,
@@ -80,13 +96,16 @@ public static class ExportConverter
         var exporter = new MessageExporter(context);
         try
         {
-            foreach (var message in parsed.Messages)
+            foreach (var messageWithReferencedUsers in messagesWithReferencedUsers)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                foreach (var user in message.GetReferencedUsers())
+                foreach (var user in messageWithReferencedUsers.ReferencedUsers)
                     await context.PopulateMemberAsync(user, cancellationToken);
 
-                await exporter.ExportMessageAsync(message, cancellationToken);
+                await exporter.ExportMessageAsync(
+                    messageWithReferencedUsers.Message,
+                    cancellationToken
+                );
             }
         }
         finally
