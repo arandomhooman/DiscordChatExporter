@@ -22,6 +22,26 @@ public static class ExportConverter
             throw new InvalidExportException("JSON is not a supported conversion target.");
 
         var parsed = await JsonExportReader.ParseAsync(jsonFilePath, cancellationToken);
+        return await ConvertAsync(
+            parsed,
+            jsonFilePath,
+            outputFilePath,
+            targetFormat,
+            cancellationToken
+        );
+    }
+
+    public static async ValueTask<ExportResult> ConvertAsync(
+        ParsedExport parsed,
+        string jsonFilePath,
+        string outputFilePath,
+        ExportFormat targetFormat,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (targetFormat is ExportFormat.Json)
+            throw new InvalidExportException("JSON is not a supported conversion target.");
+
         var referencedUsers = parsed.Messages.SelectMany(m => m.GetReferencedUsers()).ToArray();
         var request = new ExportRequest(
             parsed.Guild,

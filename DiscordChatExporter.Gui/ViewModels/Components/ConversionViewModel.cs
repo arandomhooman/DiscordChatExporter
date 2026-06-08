@@ -21,7 +21,16 @@ public sealed partial class ConversionViewModel(
     Func<FilePickerFileType[], Task<IReadOnlyList<string>>>? promptMultipleFilePathsAsync = null,
     Func<string, Task<string?>>? promptDirectoryPathAsync = null,
     Func<string, string, ExportFormat, CancellationToken, ValueTask<ExportResult>>? convertAsync =
-        null
+        null,
+    Func<string, CancellationToken, ValueTask<ParsedExport>>? parseAsync = null,
+    Func<
+        ParsedExport,
+        string,
+        string,
+        ExportFormat,
+        CancellationToken,
+        ValueTask<ExportResult>
+    >? convertParsedAsync = null
 ) : ViewModelBase
 {
     private readonly Func<
@@ -33,13 +42,23 @@ public sealed partial class ConversionViewModel(
     private readonly Func<string, Task<string?>> _promptDirectoryPathAsync =
         promptDirectoryPathAsync
         ?? (defaultDirPath => dialogManager.PromptDirectoryPathAsync(defaultDirPath));
+    private readonly Func<string, CancellationToken, ValueTask<ParsedExport>> _parseAsync =
+        parseAsync ?? JsonExportReader.ParseAsync;
     private readonly Func<
+        ParsedExport,
         string,
         string,
         ExportFormat,
         CancellationToken,
         ValueTask<ExportResult>
-    > _convertAsync = convertAsync ?? ExportConverter.ConvertAsync;
+    > _convertParsedAsync =
+        convertParsedAsync
+        ?? (
+            convertAsync is not null
+                ? (_, sourceFilePath, outputFilePath, format, cancellationToken) =>
+                    convertAsync(sourceFilePath, outputFilePath, format, cancellationToken)
+                : ExportConverter.ConvertAsync
+        );
 
     private const string ConvertedMessage = "Converted";
     private const string CanceledMessage = "Canceled";
@@ -215,15 +234,13 @@ public sealed partial class ConversionViewModel(
                 if (remainingJobs.Length <= 0)
                     continue;
 
-                bool hasConversionData;
+                ParsedExport parsed;
                 try
                 {
-                    hasConversionData = (
-                        await RunConversionWorkOffUiThreadAsync(
-                            () => JsonExportReader.ParseAsync(sourcePath, cancellationToken),
-                            cancellationToken
-                        )
-                    ).HasConversionDataBlock;
+                    parsed = await RunConversionWorkOffUiThreadAsync(
+                        () => _parseAsync(sourcePath, cancellationToken),
+                        cancellationToken
+                    );
                 }
                 catch (OperationCanceledException)
                 {
@@ -248,13 +265,16 @@ public sealed partial class ConversionViewModel(
                     continue;
                 }
 
+                var hasConversionData = parsed.HasConversionDataBlock;
+
                 foreach (var job in remainingJobs)
                 {
                     try
                     {
                         await RunConversionWorkOffUiThreadAsync(
                             () =>
-                                _convertAsync(
+                                _convertParsedAsync(
+                                    parsed,
                                     job.SourceFilePath,
                                     job.OutputFilePath,
                                     job.Format,

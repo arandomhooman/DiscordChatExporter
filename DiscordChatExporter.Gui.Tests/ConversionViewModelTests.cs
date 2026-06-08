@@ -6,7 +6,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
+using DiscordChatExporter.Core.Discord;
+using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exporting;
+using DiscordChatExporter.Core.Exporting.Conversion;
 using DiscordChatExporter.Gui.Framework;
 using DiscordChatExporter.Gui.Localization;
 using DiscordChatExporter.Gui.Services;
@@ -105,6 +108,33 @@ public sealed class ConversionViewModelTests : IDisposable
         return path;
     }
 
+    private static ParsedExport CreateParsedExport(bool hasConversionDataBlock = false)
+    {
+        var guild = new Guild(new Snowflake(1), "Test Guild", "");
+        var channel = new Channel(
+            new Snowflake(2),
+            ChannelKind.GuildTextChat,
+            guild.Id,
+            null,
+            "test-channel",
+            null,
+            null,
+            null,
+            false,
+            null
+        );
+
+        return new ParsedExport(
+            guild,
+            channel,
+            [],
+            hasConversionDataBlock ? new ConversionData([], [], []) : null,
+            hasConversionDataBlock,
+            null,
+            null
+        );
+    }
+
     private ConversionViewModel CreateViewModel(
         Func<
             string,
@@ -112,12 +142,23 @@ public sealed class ConversionViewModelTests : IDisposable
             ExportFormat,
             CancellationToken,
             ValueTask<ExportResult>
-        >? convertAsync = null
+        >? convertAsync = null,
+        Func<string, CancellationToken, ValueTask<ParsedExport>>? parseAsync = null,
+        Func<
+            ParsedExport,
+            string,
+            string,
+            ExportFormat,
+            CancellationToken,
+            ValueTask<ExportResult>
+        >? convertParsedAsync = null
     ) =>
         new(
             new DialogManager(),
             new LocalizationManager(new SettingsService()),
-            convertAsync: convertAsync
+            convertAsync: convertAsync,
+            parseAsync: parseAsync,
+            convertParsedAsync: convertParsedAsync
         )
         {
             OutputFolderPath = _dir,
@@ -268,6 +309,40 @@ public sealed class ConversionViewModelTests : IDisposable
         (await File.ReadAllTextAsync(existingOutput, TestContext.Current.CancellationToken))
             .Should()
             .Be("do not replace");
+    }
+
+    [Fact]
+    public async Task Convert_parses_each_source_once_for_multiple_target_formats()
+    {
+        var json = WriteJson("chat.json", "from json");
+        var parsed = CreateParsedExport(hasConversionDataBlock: true);
+        var parseCount = 0;
+        var convertCount = 0;
+        var viewModel = CreateViewModel(
+            parseAsync: (sourceFilePath, _) =>
+            {
+                sourceFilePath.Should().Be(json);
+                parseCount++;
+                return ValueTask.FromResult(parsed);
+            },
+            convertParsedAsync: (parsedExport, sourceFilePath, _, _, _) =>
+            {
+                parsedExport.Should().BeSameAs(parsed);
+                sourceFilePath.Should().Be(json);
+                convertCount++;
+                return ValueTask.FromResult(new ExportResult([], 0, 0));
+            }
+        );
+        viewModel.IsHtmlDarkSelected = true;
+        viewModel.IsCsvSelected = true;
+        viewModel.SourceFilePaths.Add(json);
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        parseCount.Should().Be(1);
+        convertCount.Should().Be(2);
+        viewModel.Results.Should().HaveCount(2);
+        viewModel.Results.Should().OnlyContain(r => r.IsSuccess && r.HasConversionData);
     }
 
     [Fact]
