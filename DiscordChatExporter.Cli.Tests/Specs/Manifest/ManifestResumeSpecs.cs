@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exporting;
@@ -13,7 +15,13 @@ namespace DiscordChatExporter.Cli.Tests.Specs.Manifest;
 
 public class ManifestResumeSpecs
 {
-    private static ManifestEntry Entry(string file) =>
+    private static string ComputeSha256(string filePath)
+    {
+        using var stream = File.OpenRead(filePath);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
+    }
+
+    private static ManifestEntry Entry(string file, long fileSizeBytes = 0, string sha256 = "x") =>
         new(
             "1",
             "g",
@@ -28,8 +36,8 @@ public class ManifestResumeSpecs
             null,
             null,
             null,
-            0,
-            "x",
+            fileSizeBytes,
+            sha256,
             false,
             DateTimeOffset.UnixEpoch
         );
@@ -38,8 +46,11 @@ public class ManifestResumeSpecs
         new(
             ExportManifest.CurrentSchemaVersion,
             DateTimeOffset.UnixEpoch,
-            Array.ConvertAll(files, Entry)
+            files.Select(file => Entry(file)).ToArray()
         );
+
+    private static ExportManifest Manifest(params ManifestEntry[] entries) =>
+        new(ExportManifest.CurrentSchemaVersion, DateTimeOffset.UnixEpoch, entries);
 
     private static ExportRequest Request(string filePath, ulong guildId, ulong channelId) =>
         new(
@@ -111,7 +122,9 @@ public class ManifestResumeSpecs
 
         try
         {
-            var manifest = Manifest("archive.json");
+            var manifest = Manifest(
+                Entry("archive.json", new FileInfo(filePath).Length, ComputeSha256(filePath))
+            );
 
             ManifestResume
                 .IsAlreadyExported(manifest, dir, Request(filePath, guildId: 1, channelId: 2))
@@ -128,6 +141,33 @@ public class ManifestResumeSpecs
                 .IsAlreadyExported(manifest, dir, Request(filePath, guildId: 1, channelId: 2))
                 .Should()
                 .BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Strict_resume_matching_rejects_a_file_with_changed_size_or_hash()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "DceManifest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var filePath = Path.Combine(dir, "archive.json");
+
+        try
+        {
+            File.WriteAllText(filePath, "hello");
+            var manifest = Manifest(
+                Entry("archive.json", new FileInfo(filePath).Length, ComputeSha256(filePath))
+            );
+            var request = Request(filePath, guildId: 1, channelId: 2);
+
+            File.WriteAllText(filePath, "hello world");
+            ManifestResume.IsAlreadyExported(manifest, dir, request).Should().BeFalse();
+
+            File.WriteAllText(filePath, "HELLO");
+            ManifestResume.IsAlreadyExported(manifest, dir, request).Should().BeFalse();
         }
         finally
         {

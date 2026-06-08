@@ -63,7 +63,7 @@ public static class ManifestBuilder
         return entries;
     }
 
-    private static string ComputeSha256(string filePath)
+    internal static string ComputeSha256(string filePath)
     {
         using var stream = File.OpenRead(filePath);
         return Convert.ToHexStringLower(SHA256.HashData(stream));

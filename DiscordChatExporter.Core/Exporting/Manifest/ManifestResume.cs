@@ -33,12 +33,32 @@ public static class ManifestResume
             return false;
 
         var fileName = Path.GetFileName(request.OutputFilePath);
-        return manifest.Entries.Any(e =>
+        var entry = manifest.Entries.FirstOrDefault(e =>
             string.Equals(e.File, fileName, StringComparison.OrdinalIgnoreCase)
             && e.GuildId == request.Guild.Id.ToString()
             && e.ChannelId == request.Channel.Id.ToString()
             && e.Format == request.Format.ToString()
-            && File.Exists(Path.Combine(dirPath, e.File))
         );
+
+        if (entry is null)
+            return false;
+
+        var filePath = Path.Combine(dirPath, entry.File);
+        if (!File.Exists(filePath))
+            return false;
+
+        try
+        {
+            return new FileInfo(filePath).Length == entry.FileSizeBytes
+                && string.Equals(
+                    ManifestBuilder.ComputeSha256(filePath),
+                    entry.Sha256,
+                    StringComparison.OrdinalIgnoreCase
+                );
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 }
