@@ -24,6 +24,7 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
         (Snowflake? Id, string Name, bool IsAnimated),
         string
     > _emojiImageUrlsByKey = new();
+    private readonly Dictionary<Snowflake, string> _emojiImageUrlsById = new();
 
     private readonly ExportAssetDownloader _assetDownloader = new(
         request.AssetsDirPath,
@@ -141,14 +142,7 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
 
     public string? TryGetEmojiImageUrl(Snowflake? id, string name, bool isAnimated) =>
         _emojiImageUrlsByKey.GetValueOrDefault((id, name, isAnimated))
-        ?? (
-            id is not null
-                ? _emojiImageUrlsByKey
-                    .Where(e => e.Key.Id == id)
-                    .Select(e => e.Value)
-                    .FirstOrDefault()
-                : null
-        );
+        ?? (id is { } emojiId ? _emojiImageUrlsById.GetValueOrDefault(emojiId) : null);
 
     public IReadOnlyList<Role> GetUserRoles(Snowflake id) =>
         TryGetMember(id)
@@ -197,6 +191,9 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
 
             Snowflake? id = !string.IsNullOrWhiteSpace(emoji.Id) ? ParseSnowflake(emoji.Id) : null;
             _emojiImageUrlsByKey[(id, emoji.Name, emoji.IsAnimated)] = emoji.ImageUrl;
+
+            if (id is { } emojiId)
+                _emojiImageUrlsById.TryAdd(emojiId, emoji.ImageUrl);
         }
 
         foreach (var member in data.Members)

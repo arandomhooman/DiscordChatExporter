@@ -109,4 +109,27 @@ public sealed class ExportContextSeedSpecs
         context.TryGetUserColor(new Snowflake(10))!.Value.Name.Should().Be("ffff0000");
         context.TryGetChannel(new Snowflake(30))!.Name.Should().Be("other-channel");
     }
+
+    [Fact]
+    public void SeedFromConversionData_populates_emoji_url_cache_by_exact_key_and_id()
+    {
+        var context = CreateContext();
+        var data = new ConversionData(
+            [],
+            [],
+            [],
+            [new ConversionEmoji("40", "blob", false, "https://cdn.example/blob.png")]
+        );
+
+        context.SeedFromConversionData(data);
+
+        context
+            .TryGetEmojiImageUrl(new Snowflake(40), "blob", false)
+            .Should()
+            .Be("https://cdn.example/blob.png");
+        context
+            .TryGetEmojiImageUrl(new Snowflake(40), "renamed", true)
+            .Should()
+            .Be("https://cdn.example/blob.png");
+    }
 }
