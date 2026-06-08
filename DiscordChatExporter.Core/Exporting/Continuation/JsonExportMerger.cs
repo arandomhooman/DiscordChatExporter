@@ -88,6 +88,7 @@ public static class JsonExportMerger
         var hasMergedConversionData =
             HasConversionData(existingBytes) || HasConversionData(newBytes);
         var wroteConversionData = false;
+        var wroteMessages = false;
 
         var reader = new Utf8JsonReader(existingBytes);
         reader.Read(); // StartObject (root)
@@ -109,6 +110,11 @@ public static class JsonExportMerger
                     break; // drop; recomputed below
 
                 case "messages":
+                    if (reader.TokenType != JsonTokenType.StartArray)
+                        throw new InvalidExportException(
+                            "The existing JSON export has a malformed 'messages' property."
+                        );
+
                     writer.WritePropertyName("messages");
                     writer.WriteStartArray();
                     while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
@@ -118,6 +124,7 @@ public static class JsonExportMerger
                     }
                     total += AppendNewMessages(newBytes, writer);
                     writer.WriteEndArray();
+                    wroteMessages = true;
                     break;
 
                 case "conversionData":
@@ -138,6 +145,11 @@ public static class JsonExportMerger
 
         if (hasMergedConversionData && !wroteConversionData)
             WriteMergedConversionData(existingBytes, newBytes, writer);
+
+        if (!wroteMessages)
+            throw new InvalidExportException(
+                "The existing JSON export does not contain a top-level 'messages' array."
+            );
 
         writer.WriteNumber("messageCount", total);
         writer.WriteEndObject();

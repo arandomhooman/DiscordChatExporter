@@ -144,6 +144,42 @@ public class JsonExportMergerSpecs
     }
 
     [Fact]
+    public async Task It_rejects_existing_exports_without_a_messages_array()
+    {
+        var existing = await WriteAsync(
+            """
+            {
+              "guild": { "id": "111", "name": "G" },
+              "channel": { "id": "222", "name": "C" },
+              "messageCount": 0
+            }
+            """
+        );
+        var fresh = await WriteAsync(Existing(MsgA, 1));
+        var existingBefore = await File.ReadAllTextAsync(existing);
+
+        try
+        {
+            var act = async () =>
+                await JsonExportMerger.MergeAsync(existing, fresh, DateTimeOffset.UtcNow);
+
+            await act.Should().ThrowAsync<InvalidExportException>();
+            (await File.ReadAllTextAsync(existing)).Should().Be(existingBefore);
+            File.Exists(existing + ".merging.tmp").Should().BeFalse();
+            File.Exists(existing + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".merging.tmp"))
+                File.Delete(existing + ".merging.tmp");
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
     public async Task It_produces_valid_json_whose_count_matches_actual_elements()
     {
         var existing = await WriteAsync(Existing(MsgA, 1));
