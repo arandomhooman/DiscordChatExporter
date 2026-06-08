@@ -229,6 +229,50 @@ public class RateLimitSpecs
         await act.Should().ThrowAsync<DiscordChatExporterException>();
     }
 
+    [Fact]
+    public async Task Optional_json_request_returns_null_for_not_found_after_successful_token_probe()
+    {
+        using var httpClient = new HttpClient(
+            new QueueHttpMessageHandler([
+                new HttpResponseMessage(HttpStatusCode.OK),
+                new HttpResponseMessage(HttpStatusCode.NotFound),
+            ])
+        );
+
+        var discord = new DiscordClient(
+            "test-token",
+            RateLimitPreference.IgnoreAll,
+            httpClient,
+            (_, _) => ValueTask.CompletedTask
+        );
+
+        var user = await discord.TryGetUserAsync(Snowflake.Parse("123456789012345678"));
+
+        user.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Optional_json_request_throws_for_auth_failure_after_successful_token_probe()
+    {
+        using var httpClient = new HttpClient(
+            new QueueHttpMessageHandler([
+                new HttpResponseMessage(HttpStatusCode.OK),
+                new HttpResponseMessage(HttpStatusCode.Unauthorized),
+            ])
+        );
+
+        var discord = new DiscordClient(
+            "test-token",
+            RateLimitPreference.IgnoreAll,
+            httpClient,
+            (_, _) => ValueTask.CompletedTask
+        );
+
+        var act = async () => await discord.TryGetUserAsync(Snowflake.Parse("123456789012345678"));
+
+        await act.Should().ThrowAsync<DiscordChatExporterException>();
+    }
+
     private static HttpResponseMessage CreateRateLimitResponse(TimeSpan retryAfter)
     {
         var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);

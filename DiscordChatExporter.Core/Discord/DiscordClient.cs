@@ -217,39 +217,42 @@ public class DiscordClient(
         using var response = await GetResponseAsync(url, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
-        {
-            throw response.StatusCode switch
-            {
-                HttpStatusCode.Unauthorized => throw new DiscordChatExporterException(
-                    "Authentication token is invalid.",
-                    true
-                ),
-
-                HttpStatusCode.Forbidden => throw new DiscordChatExporterException(
-                    $"Request to '{url}' failed: forbidden."
-                ),
-
-                HttpStatusCode.NotFound => throw new DiscordChatExporterException(
-                    $"Request to '{url}' failed: not found."
-                ),
-
-                _ => throw new DiscordChatExporterException(
-                    $"""
-                    Request to '{url}' failed: {response
-                        .StatusCode.ToString()
-                        .SeparateWords(' ')
-                        .ToLowerInvariant()}.
-                    Response content: {await response.Content.ReadAsStringAsync(
-                        cancellationToken
-                    )}
-                    """,
-                    true
-                ),
-            };
-        }
+            throw await CreateFailedResponseExceptionAsync(url, response, cancellationToken);
 
         return await response.Content.ReadAsJsonAsync(cancellationToken);
     }
+
+    private static async ValueTask<DiscordChatExporterException> CreateFailedResponseExceptionAsync(
+        string url,
+        HttpResponseMessage response,
+        CancellationToken cancellationToken = default
+    ) =>
+        response.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized => new DiscordChatExporterException(
+                "Authentication token is invalid.",
+                true
+            ),
+
+            HttpStatusCode.Forbidden => new DiscordChatExporterException(
+                $"Request to '{url}' failed: forbidden."
+            ),
+
+            HttpStatusCode.NotFound => new DiscordChatExporterException(
+                $"Request to '{url}' failed: not found."
+            ),
+
+            _ => new DiscordChatExporterException(
+                $"""
+                Request to '{url}' failed: {response
+                    .StatusCode.ToString()
+                    .SeparateWords(' ')
+                    .ToLowerInvariant()}.
+                Response content: {await response.Content.ReadAsStringAsync(cancellationToken)}
+                """,
+                true
+            ),
+        };
 
     private async ValueTask<JsonElement?> TryGetJsonResponseAsync(
         string url,
@@ -257,9 +260,13 @@ public class DiscordClient(
     )
     {
         using var response = await GetResponseAsync(url, cancellationToken);
-        return response.IsSuccessStatusCode
-            ? await response.Content.ReadAsJsonAsync(cancellationToken)
-            : null;
+        if (response.IsSuccessStatusCode)
+            return await response.Content.ReadAsJsonAsync(cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return null;
+
+        throw await CreateFailedResponseExceptionAsync(url, response, cancellationToken);
     }
 
     private async ValueTask<(
