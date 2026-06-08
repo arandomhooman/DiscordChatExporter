@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -41,6 +42,11 @@ public sealed partial class ConversionViewModel(
     public ObservableCollection<string> SourceFilePaths { get; } = [];
 
     public ObservableCollection<ConversionResultRow> Results { get; } = [];
+
+    internal static Task<T> RunConversionWorkOffUiThreadAsync<T>(
+        Func<ValueTask<T>> workAsync,
+        CancellationToken cancellationToken = default
+    ) => Task.Run(async () => await workAsync(), cancellationToken);
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ConvertCommand))]
@@ -181,7 +187,9 @@ public sealed partial class ConversionViewModel(
                 try
                 {
                     hasConversionData = (
-                        await JsonExportReader.ParseAsync(sourcePath)
+                        await RunConversionWorkOffUiThreadAsync(() =>
+                            JsonExportReader.ParseAsync(sourcePath)
+                        )
                     ).HasConversionDataBlock;
                 }
                 catch (Exception ex)
@@ -207,10 +215,12 @@ public sealed partial class ConversionViewModel(
                 {
                     try
                     {
-                        await ExportConverter.ConvertAsync(
-                            job.SourceFilePath,
-                            job.OutputFilePath,
-                            job.Format
+                        await RunConversionWorkOffUiThreadAsync(() =>
+                            ExportConverter.ConvertAsync(
+                                job.SourceFilePath,
+                                job.OutputFilePath,
+                                job.Format
+                            )
                         );
                         Results.Add(
                             new ConversionResultRow(

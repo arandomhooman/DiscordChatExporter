@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
 using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Gui.Framework;
 using DiscordChatExporter.Gui.Localization;
@@ -109,6 +111,21 @@ public sealed class ConversionViewModelTests : IDisposable
             IsHtmlDarkSelected = false,
         };
 
+    [AvaloniaFact]
+    public async Task Conversion_work_runs_off_the_ui_thread()
+    {
+        Dispatcher.UIThread.CheckAccess().Should().BeTrue();
+        var ranOnUiThread = true;
+
+        await ConversionViewModel.RunConversionWorkOffUiThreadAsync(() =>
+        {
+            ranOnUiThread = Dispatcher.UIThread.CheckAccess();
+            return ValueTask.FromResult(42);
+        });
+
+        ranOnUiThread.Should().BeFalse();
+    }
+
     [Fact]
     public async Task Convert_records_failed_source_and_continues_with_remaining_sources()
     {
@@ -130,7 +147,8 @@ public sealed class ConversionViewModelTests : IDisposable
                 Path.Combine(_dir, "good.csv"),
                 TestContext.Current.CancellationToken
             )
-        ).Should()
+        )
+            .Should()
             .Contain("hello from json");
     }
 
@@ -170,8 +188,8 @@ public sealed class ConversionViewModelTests : IDisposable
         await act.Should().NotThrowAsync();
         viewModel.Results.Should().HaveCount(2);
         viewModel.Results.Should().OnlyContain(r => r.Format == ExportFormat.Csv);
-        viewModel.Results
-            .Should()
+        viewModel
+            .Results.Should()
             .OnlyContain(r => Path.GetDirectoryName(r.OutputFilePath) == outputDir);
         viewModel.Results.Should().NotContain(r => r.SourceFilePath == lateJson);
     }
@@ -190,9 +208,11 @@ public sealed class ConversionViewModelTests : IDisposable
 
         viewModel.Results.Should().HaveCount(2);
         viewModel.Results.Should().OnlyContain(r => !r.IsSuccess);
-        viewModel.Results.Should().OnlyContain(r => r.Message.Contains("conflict", StringComparison.OrdinalIgnoreCase));
-        viewModel.Results
-            .Select(r => r.OutputFilePath)
+        viewModel
+            .Results.Should()
+            .OnlyContain(r => r.Message.Contains("conflict", StringComparison.OrdinalIgnoreCase));
+        viewModel
+            .Results.Select(r => r.OutputFilePath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Should()
             .ContainSingle();
@@ -218,9 +238,8 @@ public sealed class ConversionViewModelTests : IDisposable
         viewModel.Results.Should().ContainSingle();
         viewModel.Results[0].IsSuccess.Should().BeFalse();
         viewModel.Results[0].Message.Should().ContainEquivalentOf("conflict");
-        (
-            await File.ReadAllTextAsync(existingOutput, TestContext.Current.CancellationToken)
-        ).Should()
+        (await File.ReadAllTextAsync(existingOutput, TestContext.Current.CancellationToken))
+            .Should()
             .Be("do not replace");
     }
 
@@ -264,7 +283,9 @@ public sealed class ConversionViewModelTests : IDisposable
 
         await viewModel.ConvertCommand.ExecuteAsync(null);
 
-        var htmlResults = viewModel.Results.Where(r => r.Format is ExportFormat.HtmlDark or ExportFormat.HtmlLight);
+        var htmlResults = viewModel.Results.Where(r =>
+            r.Format is ExportFormat.HtmlDark or ExportFormat.HtmlLight
+        );
         htmlResults.Select(r => r.OutputFilePath).Should().OnlyHaveUniqueItems();
         htmlResults.Should().HaveCount(2);
         foreach (var result in htmlResults)
@@ -297,7 +318,11 @@ public sealed class ConversionViewModelTests : IDisposable
 
         await viewModel.ConvertCommand.ExecuteAsync(null);
 
-        viewModel.Results.Should().ContainSingle().Which.OutputFilePath.Should().EndWith("chat.html");
+        viewModel
+            .Results.Should()
+            .ContainSingle()
+            .Which.OutputFilePath.Should()
+            .EndWith("chat.html");
         File.Exists(Path.Combine(_dir, "chat.html")).Should().BeTrue();
         File.Exists(Path.Combine(_dir, "chat.dark.html")).Should().BeFalse();
     }
