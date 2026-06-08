@@ -147,10 +147,36 @@ jobs:
           -p:CSharpier_Bypass=true
           -p:EncryptionSalt=${{ secrets.ENCRYPTION_SALT || 'HimalayanPinkSalt' }}
           -p:PublishMacOSBundle=${{ startsWith(matrix.rid, 'osx-') }}
+          -p:DebugType=none
+          -p:DebugSymbols=false
           --output ${{ matrix.app }}/bin/publish/
           --configuration Release
           --runtime ${{ matrix.rid }}
           --self-contained
+
+      - name: Prepare release payload
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path '${{ matrix.app }}' 'bin/publish'
+
+          Get-ChildItem -LiteralPath $publishDir -Recurse -Filter '*.pdb' -File |
+            Remove-Item -Force
+
+          Copy-Item -LiteralPath 'License.txt' -Destination (Join-Path $publishDir 'License.txt') -Force
+          Copy-Item -LiteralPath 'NOTICE' -Destination (Join-Path $publishDir 'NOTICE') -Force
+
+          $pdbs = Get-ChildItem -LiteralPath $publishDir -Recurse -Filter '*.pdb' -File
+          if ($pdbs) {
+            $pdbs | ForEach-Object { Write-Error "Unexpected PDB in release payload: $($_.FullName)" }
+            exit 1
+          }
+
+          foreach ($requiredFile in @('License.txt', 'NOTICE')) {
+            $requiredPath = Join-Path $publishDir $requiredFile
+            if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+              throw "Missing required release file: $requiredFile"
+            }
+          }
 
       - name: Upload app binaries
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

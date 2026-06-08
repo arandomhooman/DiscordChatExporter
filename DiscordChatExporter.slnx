@@ -5,6 +5,7 @@
     <File Path="DiscordChatExporter.Cli.dockerfile" />
     <File Path="global.json" />
     <File Path="License.txt" />
+    <File Path="NOTICE" />
     <File Path="NuGet.config" />
     <File Path="Readme.md" />
   </Folder>
