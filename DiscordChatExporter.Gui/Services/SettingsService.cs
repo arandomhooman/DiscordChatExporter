@@ -26,7 +26,7 @@ public partial class SettingsService()
     public partial bool IsAutoUpdateEnabled { get; set; } = true;
 
     [ObservableProperty]
-    public partial bool IsTokenPersisted { get; set; } = true;
+    public partial bool IsTokenPersisted { get; set; }
 
     [ObservableProperty]
     public partial RateLimitPreference RateLimitPreference { get; set; } =
