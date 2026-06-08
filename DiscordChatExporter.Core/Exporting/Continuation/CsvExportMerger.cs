@@ -34,7 +34,7 @@ public static class CsvExportMerger
         var messageIdColumnIndex = CsvExportInspector.GetColumnIndex(header, "MessageID", -1);
         var dateColumnIndex = CsvExportInspector.GetColumnIndex(header, "Date", 2);
 
-        var tempPath = existingFilePath + ".merging.tmp";
+        var tempPath = AtomicFile.CreateSiblingTempPath(existingFilePath, ".merging.tmp");
         long added = 0;
         try
         {

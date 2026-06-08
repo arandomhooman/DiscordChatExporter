@@ -62,7 +62,7 @@ public static class ManifestWriter
 
         Directory.CreateDirectory(dirPath);
 
-        var tempPath = manifestPath + ".tmp";
+        var tempPath = AtomicFile.CreateSiblingTempPath(manifestPath, ".tmp");
 
         try
         {

@@ -65,7 +65,7 @@ public static partial class HtmlExportMerger
 
         ValidateParts(oldHtml, newSlice, oldIdStrings, newIdStrings, totalCount);
 
-        var tempPath = existingFilePath + ".merging.tmp";
+        var tempPath = AtomicFile.CreateSiblingTempPath(existingFilePath, ".merging.tmp");
         try
         {
             await using var stream = File.Create(tempPath);

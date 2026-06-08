@@ -23,7 +23,7 @@ public static class JsonExportMerger
         CancellationToken cancellationToken = default
     )
     {
-        var tempPath = existingFilePath + ".merging.tmp";
+        var tempPath = AtomicFile.CreateSiblingTempPath(existingFilePath, ".merging.tmp");
         long total;
 
         try

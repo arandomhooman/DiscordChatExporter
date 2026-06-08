@@ -121,6 +121,32 @@ public class JsonExportMergerSpecs
     }
 
     [Fact]
+    public async Task Merge_does_not_touch_fixed_temp_or_backup_sentinel_files()
+    {
+        var existing = await WriteAsync(Existing($"{MsgA},{MsgB}", 2));
+        var fresh = await WriteAsync(Existing(MsgC, 1));
+        var oldFixedTempPath = existing + ".merging.tmp";
+        var oldFixedBackupPath = existing + ".bak";
+        await File.WriteAllTextAsync(oldFixedTempPath, "user temp sentinel");
+        await File.WriteAllTextAsync(oldFixedBackupPath, "user backup sentinel");
+
+        try
+        {
+            await JsonExportMerger.MergeAsync(existing, fresh, DateTimeOffset.UnixEpoch);
+
+            (await File.ReadAllTextAsync(oldFixedTempPath)).Should().Be("user temp sentinel");
+            (await File.ReadAllTextAsync(oldFixedBackupPath)).Should().Be("user backup sentinel");
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            File.Delete(oldFixedTempPath);
+            File.Delete(oldFixedBackupPath);
+        }
+    }
+
+    [Fact]
     public async Task It_appends_into_an_export_that_had_no_messages()
     {
         var existing = await WriteAsync(Existing("", 0));

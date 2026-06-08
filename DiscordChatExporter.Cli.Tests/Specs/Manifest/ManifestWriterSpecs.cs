@@ -123,6 +123,20 @@ public class ManifestWriterSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Write_does_not_touch_fixed_temp_or_backup_sentinel_files()
+    {
+        var path = Path.Combine(_dir, ExportManifest.FileName);
+        await ManifestWriter.WriteAsync(_dir, [Entry("a.json", 1)], DateTimeOffset.UnixEpoch);
+        await File.WriteAllTextAsync(path + ".tmp", "user temp sentinel");
+        await File.WriteAllTextAsync(path + ".bak", "user backup sentinel");
+
+        await ManifestWriter.WriteAsync(_dir, [Entry("a.json", 2)], DateTimeOffset.UnixEpoch);
+
+        (await File.ReadAllTextAsync(path + ".tmp")).Should().Be("user temp sentinel");
+        (await File.ReadAllTextAsync(path + ".bak")).Should().Be("user backup sentinel");
+    }
+
+    [Fact]
     public async Task Concurrent_writes_to_the_same_manifest_do_not_lose_entries()
     {
         // Fire many parallel writes, each adding a distinct file. Without serialization,
