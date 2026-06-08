@@ -31,7 +31,8 @@ public sealed partial class ConversionViewModel(
         CancellationToken,
         ValueTask<ExportResult>
     >? convertParsedAsync = null,
-    Func<string, bool>? outputFileExists = null
+    Func<string, bool>? outputFileExists = null,
+    Func<string, StringComparer>? pathComparerForPath = null
 ) : ViewModelBase
 {
     private readonly Func<
@@ -61,6 +62,8 @@ public sealed partial class ConversionViewModel(
                 : ExportConverter.ConvertAsync
         );
     private readonly Func<string, bool> _outputFileExists = outputFileExists ?? File.Exists;
+    private readonly Func<string, StringComparer> _pathComparerForPath =
+        pathComparerForPath ?? FileSystemPathComparer.GetComparerForPath;
 
     private const string ConvertedMessage = "Converted";
     private const string CanceledMessage = "Canceled";
@@ -149,7 +152,7 @@ public sealed partial class ConversionViewModel(
 
         foreach (
             var path in paths.Where(p =>
-                !SourceFilePaths.Contains(p, StringComparer.OrdinalIgnoreCase)
+                !FileSystemPathComparer.ContainsPath(SourceFilePaths, p, _pathComparerForPath)
             )
         )
             SourceFilePaths.Add(path);
@@ -205,7 +208,8 @@ public sealed partial class ConversionViewModel(
                             sourceFilePaths,
                             targetFormats,
                             outputFolderPath,
-                            _outputFileExists
+                            _outputFileExists,
+                            _pathComparerForPath
                         )
                     ),
                 cancellationToken
@@ -215,10 +219,10 @@ public sealed partial class ConversionViewModel(
             {
                 var sourcePath = sourceJobs.First().SourceFilePath;
                 var conflictJobs = sourceJobs
-                    .Where(j => plan.ConflictingOutputPaths.Contains(j.OutputFilePath))
+                    .Where(j => plan.HasOutputConflict(j.OutputFilePath, _pathComparerForPath))
                     .ToArray();
                 var remainingJobs = sourceJobs
-                    .Where(j => !plan.ConflictingOutputPaths.Contains(j.OutputFilePath))
+                    .Where(j => !plan.HasOutputConflict(j.OutputFilePath, _pathComparerForPath))
                     .ToArray();
 
                 foreach (var job in conflictJobs)
@@ -395,15 +399,22 @@ public sealed partial class ConversionViewModel(
         IReadOnlyList<string> sourceFilePaths,
         IReadOnlyList<ExportFormat> targetFormats,
         string outputFolderPath,
-        Func<string, bool> outputFileExists
+        Func<string, bool> outputFileExists,
+        Func<string, StringComparer> pathComparerForPath
     )
     {
         var conversionJobs = CreateConversionJobs(sourceFilePaths, targetFormats, outputFolderPath);
-        var conflictingOutputPaths = conversionJobs
-            .GroupBy(j => j.OutputFilePath, StringComparer.OrdinalIgnoreCase)
-            .Where(g => g.Count() > 1 || outputFileExists(g.Key))
-            .Select(g => g.Key)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var duplicateOutputPaths = ExportOutputPathValidator.GetDuplicateOutputFilePaths(
+            conversionJobs.Select(j => j.OutputFilePath),
+            pathComparerForPath
+        );
+        var existingOutputPaths = conversionJobs
+            .Select(j => j.OutputFilePath)
+            .Where(outputFileExists);
+        var conflictingOutputPaths = duplicateOutputPaths
+            .Concat(existingOutputPaths)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         return new ConversionPlan(conversionJobs, conflictingOutputPaths);
     }
@@ -440,8 +451,19 @@ public sealed partial class ConversionViewModel(
 
     private sealed record ConversionPlan(
         IReadOnlyList<ConversionJob> Jobs,
-        IReadOnlySet<string> ConflictingOutputPaths
-    );
+        IReadOnlyList<string> ConflictingOutputPaths
+    )
+    {
+        public bool HasOutputConflict(
+            string outputFilePath,
+            Func<string, StringComparer> pathComparerForPath
+        ) =>
+            FileSystemPathComparer.ContainsPath(
+                ConflictingOutputPaths,
+                outputFilePath,
+                pathComparerForPath
+            );
+    }
 }
 
 public sealed record ConversionResultRow(

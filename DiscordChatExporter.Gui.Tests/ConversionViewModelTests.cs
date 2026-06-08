@@ -152,7 +152,8 @@ public sealed class ConversionViewModelTests : IDisposable
             CancellationToken,
             ValueTask<ExportResult>
         >? convertParsedAsync = null,
-        Func<string, bool>? outputFileExists = null
+        Func<string, bool>? outputFileExists = null,
+        Func<string, StringComparer>? pathComparerForPath = null
     ) =>
         new(
             new DialogManager(),
@@ -160,7 +161,8 @@ public sealed class ConversionViewModelTests : IDisposable
             convertAsync: convertAsync,
             parseAsync: parseAsync,
             convertParsedAsync: convertParsedAsync,
-            outputFileExists: outputFileExists
+            outputFileExists: outputFileExists,
+            pathComparerForPath: pathComparerForPath
         )
         {
             OutputFolderPath = _dir,
@@ -306,6 +308,50 @@ public sealed class ConversionViewModelTests : IDisposable
             .Should()
             .ContainSingle();
         File.Exists(Path.Combine(_dir, "chat.csv")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Convert_allows_case_only_output_names_on_case_sensitive_targets()
+    {
+        var parsed = CreateParsedExport();
+        var viewModel = CreateViewModel(
+            parseAsync: (_, _) => ValueTask.FromResult(parsed),
+            convertParsedAsync: (_, _, _, _, _) => ValueTask.FromResult(new ExportResult([], 0, 0)),
+            outputFileExists: _ => false,
+            pathComparerForPath: _ => StringComparer.Ordinal
+        );
+        viewModel.IsCsvSelected = true;
+        viewModel.SourceFilePaths.Add("C:\\sources\\one\\chat.json");
+        viewModel.SourceFilePaths.Add("C:\\sources\\two\\CHAT.json");
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        viewModel.Results.Should().HaveCount(2);
+        viewModel.Results.Should().OnlyContain(r => r.IsSuccess);
+        viewModel.Results.Select(r => r.OutputFilePath).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task Convert_reports_case_only_output_conflicts_on_case_insensitive_targets()
+    {
+        var parsed = CreateParsedExport();
+        var viewModel = CreateViewModel(
+            parseAsync: (_, _) => ValueTask.FromResult(parsed),
+            convertParsedAsync: (_, _, _, _, _) => ValueTask.FromResult(new ExportResult([], 0, 0)),
+            outputFileExists: _ => false,
+            pathComparerForPath: _ => StringComparer.OrdinalIgnoreCase
+        );
+        viewModel.IsCsvSelected = true;
+        viewModel.SourceFilePaths.Add("C:\\sources\\one\\chat.json");
+        viewModel.SourceFilePaths.Add("C:\\sources\\two\\CHAT.json");
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        viewModel.Results.Should().HaveCount(2);
+        viewModel.Results.Should().OnlyContain(r => !r.IsSuccess);
+        viewModel
+            .Results.Should()
+            .OnlyContain(r => r.Message.Contains("conflict", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -500,5 +546,27 @@ public sealed class ConversionViewModelTests : IDisposable
         await viewModel.PickOutputFolderCommand.ExecuteAsync(null);
 
         viewModel.OutputFolderPath.Should().Be(ExistingOutputPath);
+    }
+
+    [Fact]
+    public async Task Pick_files_respects_case_sensitive_source_paths()
+    {
+        var viewModel = new ConversionViewModel(
+            new DialogManager(),
+            new LocalizationManager(new SettingsService()),
+            promptMultipleFilePathsAsync: _ =>
+                Task.FromResult<IReadOnlyList<string>>([
+                    "C:\\sources\\chat.json",
+                    "C:\\sources\\CHAT.json",
+                ]),
+            pathComparerForPath: _ => StringComparer.Ordinal
+        )
+        {
+            IsHtmlDarkSelected = false,
+        };
+
+        await viewModel.PickFilesCommand.ExecuteAsync(null);
+
+        viewModel.SourceFilePaths.Should().HaveCount(2);
     }
 }
