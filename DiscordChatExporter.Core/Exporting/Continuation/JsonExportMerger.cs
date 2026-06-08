@@ -28,11 +28,19 @@ public static class JsonExportMerger
 
         try
         {
-            var existingBytes = await File.ReadAllBytesAsync(existingFilePath, cancellationToken);
-            var newBytes = await File.ReadAllBytesAsync(newMessagesFilePath, cancellationToken);
-
-            await using (var outStream = File.Create(tempPath))
             {
+                await using var existingStream = File.OpenRead(existingFilePath);
+                await using var newStream = File.OpenRead(newMessagesFilePath);
+                using var existingDocument = await JsonDocument.ParseAsync(
+                    existingStream,
+                    cancellationToken: cancellationToken
+                );
+                using var newDocument = await JsonDocument.ParseAsync(
+                    newStream,
+                    cancellationToken: cancellationToken
+                );
+
+                await using var outStream = File.Create(tempPath);
                 await using var writer = new Utf8JsonWriter(
                     outStream,
                     new JsonWriterOptions
@@ -43,7 +51,13 @@ public static class JsonExportMerger
                     }
                 );
 
-                total = Merge(existingBytes, newBytes, exportedAt, writer);
+                total = Merge(
+                    existingDocument.RootElement,
+                    newDocument.RootElement,
+                    exportedAt,
+                    writer,
+                    cancellationToken
+                );
                 await writer.FlushAsync(cancellationToken);
             }
 
@@ -78,51 +92,53 @@ public static class JsonExportMerger
     }
 
     private static long Merge(
-        byte[] existingBytes,
-        byte[] newBytes,
+        JsonElement existingRoot,
+        JsonElement newRoot,
         DateTimeOffset exportedAt,
-        Utf8JsonWriter writer
+        Utf8JsonWriter writer,
+        CancellationToken cancellationToken
     )
     {
         long total = 0;
-        var hasMergedConversionData =
-            HasConversionData(existingBytes) || HasConversionData(newBytes);
+        var hasMergedConversionData = HasConversionData(existingRoot) || HasConversionData(newRoot);
         var wroteConversionData = false;
         var wroteMessages = false;
 
-        var reader = new Utf8JsonReader(existingBytes);
-        reader.Read(); // StartObject (root)
+        if (existingRoot.ValueKind != JsonValueKind.Object)
+            throw new InvalidExportException(
+                "The existing JSON export is not a top-level JSON object."
+            );
+
         writer.WriteStartObject();
 
-        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        foreach (var property in existingRoot.EnumerateObject())
         {
-            var name = reader.GetString();
-            reader.Read(); // advance to value
+            cancellationToken.ThrowIfCancellationRequested();
 
-            switch (name)
+            switch (property.Name)
             {
                 case "exportedAt":
                     writer.WriteString("exportedAt", exportedAt);
-                    // Discard the original timestamp token; we write a fresh exportedAt above.
                     break;
 
                 case "messageCount":
                     break; // drop; recomputed below
 
                 case "messages":
-                    if (reader.TokenType != JsonTokenType.StartArray)
+                    if (property.Value.ValueKind != JsonValueKind.Array)
                         throw new InvalidExportException(
                             "The existing JSON export has a malformed 'messages' property."
                         );
 
                     writer.WritePropertyName("messages");
                     writer.WriteStartArray();
-                    while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+                    foreach (var message in property.Value.EnumerateArray())
                     {
-                        CopyValue(ref reader, writer);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        message.WriteTo(writer);
                         total++;
                     }
-                    total += AppendNewMessages(newBytes, writer);
+                    total += AppendNewMessages(newRoot, writer, cancellationToken);
                     writer.WriteEndArray();
                     wroteMessages = true;
                     break;
@@ -130,21 +146,20 @@ public static class JsonExportMerger
                 case "conversionData":
                     if (hasMergedConversionData)
                     {
-                        WriteMergedConversionData(existingBytes, newBytes, writer);
+                        WriteMergedConversionData(existingRoot, newRoot, writer);
                         wroteConversionData = true;
                     }
-                    reader.Skip();
                     break;
 
                 default:
-                    writer.WritePropertyName(name!);
-                    CopyValue(ref reader, writer);
+                    writer.WritePropertyName(property.Name);
+                    property.Value.WriteTo(writer);
                     break;
             }
         }
 
         if (hasMergedConversionData && !wroteConversionData)
-            WriteMergedConversionData(existingBytes, newBytes, writer);
+            WriteMergedConversionData(existingRoot, newRoot, writer);
 
         if (!wroteMessages)
             throw new InvalidExportException(
@@ -156,52 +171,48 @@ public static class JsonExportMerger
         return total;
     }
 
-    private static long AppendNewMessages(byte[] newBytes, Utf8JsonWriter writer)
+    private static long AppendNewMessages(
+        JsonElement newRoot,
+        Utf8JsonWriter writer,
+        CancellationToken cancellationToken
+    )
     {
-        long count = 0;
-        var reader = new Utf8JsonReader(newBytes);
-        reader.Read(); // StartObject (root)
-
-        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        if (
+            newRoot.ValueKind != JsonValueKind.Object
+            || !newRoot.TryGetProperty("messages", out var messages)
+            || messages.ValueKind != JsonValueKind.Array
+        )
         {
-            var name = reader.GetString();
-            reader.Read();
-            if (name == "messages")
-            {
-                while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
-                {
-                    CopyValue(ref reader, writer);
-                    count++;
-                }
-                break;
-            }
-            reader.Skip();
+            throw new InvalidExportException(
+                "The new JSON export does not contain a top-level 'messages' array."
+            );
+        }
+
+        long count = 0;
+        foreach (var message in messages.EnumerateArray())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            message.WriteTo(writer);
+            count++;
         }
         return count;
     }
 
-    private static bool HasConversionData(byte[] bytes)
-    {
-        using var document = JsonDocument.Parse(bytes);
-        return document.RootElement.TryGetProperty("conversionData", out var conversionData)
-            && conversionData.ValueKind == JsonValueKind.Object;
-    }
+    private static bool HasConversionData(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object
+        && root.TryGetProperty("conversionData", out var conversionData)
+        && conversionData.ValueKind == JsonValueKind.Object;
 
     private static void WriteMergedConversionData(
-        byte[] existingBytes,
-        byte[] newBytes,
+        JsonElement existingRoot,
+        JsonElement newRoot,
         Utf8JsonWriter writer
     )
     {
-        using var existingDocument = JsonDocument.Parse(existingBytes);
-        using var newDocument = JsonDocument.Parse(newBytes);
-        var existing = existingDocument.RootElement.TryGetProperty(
-            "conversionData",
-            out var existingData
-        )
+        var existing = existingRoot.TryGetProperty("conversionData", out var existingData)
             ? existingData
             : default;
-        var fresh = newDocument.RootElement.TryGetProperty("conversionData", out var freshData)
+        var fresh = newRoot.TryGetProperty("conversionData", out var freshData)
             ? freshData
             : default;
 
@@ -278,68 +289,5 @@ public static class JsonExportMerger
         return string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(name)
             ? null
             : $"{id}|{name}|{isAnimated}";
-    }
-
-    // Copies the complete JSON value the reader is currently positioned on (scalar or
-    // container subtree), leaving the reader on that value's final token.
-    private static void CopyValue(ref Utf8JsonReader reader, Utf8JsonWriter writer)
-    {
-        if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
-        {
-            var depth = 0;
-            do
-            {
-                CopyToken(ref reader, writer);
-                if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
-                    depth++;
-                else if (reader.TokenType is JsonTokenType.EndObject or JsonTokenType.EndArray)
-                    depth--;
-
-                if (depth == 0)
-                    break;
-                reader.Read();
-            } while (true);
-        }
-        else
-        {
-            CopyToken(ref reader, writer);
-        }
-    }
-
-    private static void CopyToken(ref Utf8JsonReader reader, Utf8JsonWriter writer)
-    {
-        switch (reader.TokenType)
-        {
-            case JsonTokenType.StartObject:
-                writer.WriteStartObject();
-                break;
-            case JsonTokenType.EndObject:
-                writer.WriteEndObject();
-                break;
-            case JsonTokenType.StartArray:
-                writer.WriteStartArray();
-                break;
-            case JsonTokenType.EndArray:
-                writer.WriteEndArray();
-                break;
-            case JsonTokenType.PropertyName:
-                writer.WritePropertyName(reader.GetString()!);
-                break;
-            case JsonTokenType.String:
-                writer.WriteStringValue(reader.GetString());
-                break;
-            case JsonTokenType.Number:
-                writer.WriteRawValue(reader.ValueSpan, skipInputValidation: true);
-                break;
-            case JsonTokenType.True:
-                writer.WriteBooleanValue(true);
-                break;
-            case JsonTokenType.False:
-                writer.WriteBooleanValue(false);
-                break;
-            case JsonTokenType.Null:
-                writer.WriteNullValue();
-                break;
-        }
     }
 }
