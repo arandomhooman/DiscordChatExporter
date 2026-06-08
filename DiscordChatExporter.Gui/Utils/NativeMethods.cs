@@ -22,7 +22,12 @@ internal static class NativeMethods
             public uint dwTimeout;
         }
 
-        [DllImport("user32.dll", SetLastError = true)]
+        [DllImport(
+            "user32.dll",
+            EntryPoint = "MessageBoxW",
+            CharSet = CharSet.Unicode,
+            SetLastError = true
+        )]
         public static extern int MessageBox(nint hWnd, string text, string caption, uint type);
 
         [SupportedOSPlatform("windows")]
