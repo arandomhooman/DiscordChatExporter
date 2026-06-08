@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using DiscordChatExporter.Gui.Framework;
 using FluentAssertions;
@@ -45,5 +46,34 @@ public sealed class ViewManagerTests
         var act = async () => await manager.InitializeViewModelOnceAsync(viewModel);
 
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task Initialized_view_models_are_not_retained_forever()
+    {
+        var viewManager = new ViewManager();
+        var reference = await InitializeAndReleaseAsync(viewManager);
+
+        CollectGarbage();
+
+        reference.IsAlive.Should().BeFalse();
+        GC.KeepAlive(viewManager);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<WeakReference> InitializeAndReleaseAsync(ViewManager viewManager)
+    {
+        var viewModel = new CountingViewModel();
+
+        await viewManager.InitializeViewModelOnceAsync(viewModel);
+
+        return new WeakReference(viewModel);
+    }
+
+    private static void CollectGarbage()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
     }
 }

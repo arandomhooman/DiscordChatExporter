@@ -30,7 +30,7 @@ public sealed class MainViewNavigationTests
         services.AddSingleton<ViewModelManager>();
 
         // Services
-        services.AddSingleton<SettingsService>();
+        services.AddSingleton(TestSettingsServiceFactory.Create());
         services.AddSingleton<UpdateService>();
 
         // Localization

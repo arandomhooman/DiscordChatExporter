@@ -44,7 +44,7 @@ public sealed class LibraryViewRenderTests
         services.AddSingleton<ViewModelManager>();
 
         // Services
-        services.AddSingleton<SettingsService>();
+        services.AddSingleton(TestSettingsServiceFactory.Create());
         services.AddSingleton<UpdateService>();
 
         // Localization
@@ -194,10 +194,7 @@ public sealed class LibraryViewRenderTests
 
         renderedTexts
             .Should()
-            .Contain(
-                DbFile,
-                "the catalog item template's File binding should resolve and render"
-            );
+            .Contain(DbFile, "the catalog item template's File binding should resolve and render");
         renderedTexts
             .Should()
             .Contain(

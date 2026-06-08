@@ -1,6 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
@@ -16,7 +16,9 @@ namespace DiscordChatExporter.Gui.Framework;
 public partial class ViewManager
 {
     private readonly object _initializationLock = new();
-    private readonly HashSet<ViewModelBase> _initializedViewModels = [];
+    private readonly ConditionalWeakTable<ViewModelBase, object> _initializedViewModels = new();
+
+    private static readonly object InitializedViewModelMarker = new();
 
     private Control? TryCreateView(ViewModelBase viewModel) =>
         viewModel switch
@@ -35,8 +37,10 @@ public partial class ViewManager
     {
         lock (_initializationLock)
         {
-            if (!_initializedViewModels.Add(viewModel))
+            if (_initializedViewModels.TryGetValue(viewModel, out _))
                 return;
+
+            _initializedViewModels.Add(viewModel, InitializedViewModelMarker);
         }
 
         try

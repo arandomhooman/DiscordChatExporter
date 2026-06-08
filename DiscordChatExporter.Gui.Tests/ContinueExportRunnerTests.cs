@@ -44,7 +44,7 @@ public sealed class ContinueExportRunnerTests
         services.AddSingleton<SnackbarManager, TestSnackbarManager>();
         services.AddSingleton<ViewManager>();
         services.AddSingleton<ViewModelManager>();
-        services.AddSingleton<SettingsService>();
+        services.AddSingleton(TestSettingsServiceFactory.Create());
         services.AddSingleton<UpdateService>();
         services.AddSingleton<LocalizationManager>();
         services.AddTransient<MainViewModel>();

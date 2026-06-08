@@ -26,7 +26,7 @@ public sealed class DashboardCommandGatingTests
         services.AddSingleton<SnackbarManager>();
         services.AddSingleton<ViewManager>();
         services.AddSingleton<ViewModelManager>();
-        services.AddSingleton<SettingsService>();
+        services.AddSingleton(TestSettingsServiceFactory.Create());
         services.AddSingleton<UpdateService>();
         services.AddSingleton<LocalizationManager>();
         services.AddTransient<MainViewModel>();
