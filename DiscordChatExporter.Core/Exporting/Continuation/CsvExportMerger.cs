@@ -39,6 +39,7 @@ public static class CsvExportMerger
         try
         {
             File.Copy(existingFilePath, tempPath, true);
+            var needsRowSeparator = NeedsTrailingLineBreak(tempPath);
             await using (var writer = new StreamWriter(new FileStream(tempPath, FileMode.Append)))
             {
                 for (var i = 1; i < newRows.Count; i++)
@@ -59,6 +60,12 @@ public static class CsvExportMerger
                         if (messageId.Value <= cutoff.Cutoff.Value)
                             continue;
 
+                        if (needsRowSeparator)
+                        {
+                            await writer.WriteAsync("\r\n");
+                            needsRowSeparator = false;
+                        }
+
                         await writer.WriteAsync(EncodeRow(fields));
                         added++;
                         continue;
@@ -74,6 +81,12 @@ public static class CsvExportMerger
                         && Snowflake.FromDate(date).Value <= cutoff.Cutoff.Value
                     )
                         continue;
+
+                    if (needsRowSeparator)
+                    {
+                        await writer.WriteAsync("\r\n");
+                        needsRowSeparator = false;
+                    }
 
                     await writer.WriteAsync(EncodeRow(fields));
                     added++;
@@ -106,6 +119,16 @@ public static class CsvExportMerger
             throw;
         }
         return added;
+    }
+
+    private static bool NeedsTrailingLineBreak(string filePath)
+    {
+        using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+        if (stream.Length <= 0)
+            return false;
+
+        stream.Seek(-1, SeekOrigin.End);
+        return stream.ReadByte() is not ('\r' or '\n');
     }
 
     private static string EncodeRow(IReadOnlyList<string> fields)

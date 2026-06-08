@@ -144,4 +144,38 @@ public class CsvExportMergerSpecs
                 File.Delete(existing + ".bak");
         }
     }
+
+    [Fact]
+    public async Task It_separates_appended_rows_when_existing_file_has_no_trailing_newline()
+    {
+        var d1 = "2021-07-24T13:49:13.0000000+00:00";
+        var d2 = "2021-07-25T10:00:00.0000000+00:00";
+        var existing = await WriteAsync((Header + Row(d1, "existing")).TrimEnd('\r', '\n'));
+        var fresh = await WriteAsync(Header + Row(d2, "fresh"));
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            Snowflake.FromDate(DateTimeOffset.Parse(d1)),
+            null,
+            true,
+            1,
+            false
+        );
+
+        try
+        {
+            var added = await CsvExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            added.Should().Be(1);
+            var text = await File.ReadAllTextAsync(existing);
+            text.Should().Contain("\"existing\",\"\",\"\"\r\n\"5\",\"A\"");
+            File.ReadAllLines(existing).Should().HaveCount(3);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
 }
