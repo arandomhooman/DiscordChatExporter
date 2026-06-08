@@ -21,6 +21,9 @@ public static class ContinueExportDiscovery
             directories,
             cancellationToken
         );
+        var entriesByChannelId = entries
+            .GroupBy(e => e.ChannelId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
         var resolved = new List<ResolvedCatalogEntry>();
         var unresolved = new List<UnresolvedCatalogChannel>();
 
@@ -28,7 +31,9 @@ public static class ContinueExportDiscovery
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var candidates = entries.Where(e => e.ChannelId == channelId.ToString()).ToArray();
+            var channelIdText = channelId.ToString();
+            if (!entriesByChannelId.TryGetValue(channelIdText, out var candidates))
+                candidates = [];
 
             if (candidates.Length == 0)
             {
