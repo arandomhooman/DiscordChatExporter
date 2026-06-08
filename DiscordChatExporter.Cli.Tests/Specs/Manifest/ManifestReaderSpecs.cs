@@ -160,4 +160,32 @@ public class ManifestReaderSpecs
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task Reading_a_future_schema_version_returns_null()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"dce-manifest-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(
+            path,
+            /* lang=json */
+            """
+            {
+              "schemaVersion": 999,
+              "generatedAt": "2026-01-01T00:00:00+00:00",
+              "entries": []
+            }
+            """
+        );
+
+        try
+        {
+            var manifest = await ManifestReader.TryReadAsync(path);
+
+            manifest.Should().BeNull();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

@@ -31,6 +31,9 @@ public static class ManifestReader
             if (manifest is null)
                 return null;
 
+            if (manifest.SchemaVersion > ExportManifest.CurrentSchemaVersion)
+                return null;
+
             // STJ source-gen doesn't enforce non-null refs: a valid-but-incomplete manifest can
             // carry a null Entries collection or null elements. Normalize here so every consumer
             // can rely on non-null Entries with non-null elements.

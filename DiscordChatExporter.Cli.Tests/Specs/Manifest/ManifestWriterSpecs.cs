@@ -69,6 +69,27 @@ public class ManifestWriterSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Write_does_not_overwrite_a_future_schema_manifest()
+    {
+        var path = Path.Combine(_dir, ExportManifest.FileName);
+        const string futureManifest = """
+            {
+              "schemaVersion": 999,
+              "generatedAt": "2026-01-01T00:00:00+00:00",
+              "entries": []
+            }
+            """;
+        await File.WriteAllTextAsync(path, futureManifest);
+
+        var act = async () =>
+            await ManifestWriter.WriteAsync(_dir, [Entry("new.json", 1)], DateTimeOffset.UnixEpoch);
+
+        await act.Should().ThrowAsync<IOException>();
+        (await File.ReadAllTextAsync(path)).Should().Be(futureManifest);
+        File.Exists(path + ".tmp").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Writing_again_replaces_entries_for_the_same_file_and_keeps_the_others()
     {
         await ManifestWriter.WriteAsync(
