@@ -10,9 +10,14 @@ using DiscordChatExporter.Gui.Models;
 namespace DiscordChatExporter.Gui.Services;
 
 [ObservableObject]
-public partial class SettingsService()
-    : SettingsBase(StartOptions.Current.SettingsPath, SerializerContext.Default)
+public partial class SettingsService : SettingsBase
 {
+    public SettingsService()
+        : this(StartOptions.Current.SettingsPath) { }
+
+    internal SettingsService(string settingsPath)
+        : base(settingsPath, SerializerContext.Default) { }
+
     [ObservableProperty]
     public partial bool IsUkraineSupportMessageEnabled { get; set; } = true;
 
@@ -82,9 +87,14 @@ public partial class SettingsService()
         if (!IsTokenPersisted)
             LastToken = null;
 
-        base.Save();
-
-        LastToken = lastToken;
+        try
+        {
+            base.Save();
+        }
+        finally
+        {
+            LastToken = lastToken;
+        }
     }
 }
 
