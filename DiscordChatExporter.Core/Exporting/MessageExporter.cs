@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
+using DiscordChatExporter.Core.Exporting.Partitioning;
 
 namespace DiscordChatExporter.Core.Exporting;
 
@@ -27,6 +28,17 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
         CancellationToken cancellationToken = default
     )
     {
+        if (
+            context.Request.Format is ExportFormat.Db
+            && context.Request.PartitionLimit is FileSizePartitionLimit
+        )
+        {
+            _hasWriterInitializationFailed = true;
+            throw new NotSupportedException(
+                "SQLite exports do not support file-size partitioning. Use message-count partitioning or disable partitioning."
+            );
+        }
+
         // Ensure that the partition limit has not been reached
         if (
             _writer is not null

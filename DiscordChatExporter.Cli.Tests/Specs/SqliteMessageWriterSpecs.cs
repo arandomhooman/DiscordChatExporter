@@ -40,7 +40,10 @@ public class SqliteMessageWriterSpecs : IDisposable
 
     // A fully offline context. shouldDownloadAssets=false makes ResolveAssetUrlAsync a no-op,
     // and shouldFormatMarkdown=false keeps message content as the raw string we assert on.
-    private static ExportContext CreateContext(string outputPath)
+    private static ExportContext CreateContext(
+        string outputPath,
+        PartitionLimit? partitionLimit = null
+    )
     {
         var guild = new Guild(new Snowflake(1), "Test Guild", "");
         var channel = new Channel(
@@ -64,7 +67,7 @@ public class SqliteMessageWriterSpecs : IDisposable
             ExportFormat.Db,
             null,
             null,
-            PartitionLimit.Null,
+            partitionLimit ?? PartitionLimit.Null,
             MessageFilter.Null,
             isReverseMessageOrder: false,
             shouldFormatMarkdown: false,
@@ -75,6 +78,19 @@ public class SqliteMessageWriterSpecs : IDisposable
         );
 
         return new ExportContext(new DiscordClient("fake-token"), request);
+    }
+
+    [Fact]
+    public async Task File_size_partitioning_is_rejected_for_sqlite_exports()
+    {
+        var context = CreateContext(DbPath, PartitionLimit.Parse("1b"));
+        await using var exporter = new MessageExporter(context);
+        var author = CreateUser(1, "alice");
+        var message = CreateMessage(10, author, "hello");
+
+        var act = async () => await exporter.ExportMessageAsync(message);
+
+        await act.Should().ThrowAsync<NotSupportedException>().WithMessage("*SQLite*");
     }
 
     private static User CreateUser(ulong id, string name, bool isBot = false) =>
