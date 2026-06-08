@@ -11,6 +11,7 @@ using PowerKit.Extensions;
 
 namespace DiscordChatExporter.Core.Exporting;
 
+// Writes a channel export as a self-contained SQLite database with full-text search metadata.
 internal class SqliteMessageWriter : MessageWriter
 {
     private const string SchemaSql = """

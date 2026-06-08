@@ -40,6 +40,7 @@ Please refer to the on-screen instructions to get your token, then paste your to
 ### Step 3
 
 DCE will display your Direct Messages and a sidebar with your server list. Select the channel you would like to export, then click the ![Screenshot](https://i.imgur.com/dnTOlDa.png) button to continue.
+The top toolbar also includes buttons for the export Library and JSON conversion.
 
 > **Note**:
 > You can export multiple channels at once by holding `CTRL` or `SHIFT` while selecting.
@@ -53,7 +54,7 @@ In this screen you can customize the following:
 
 - **Output path** - The folder where the exported chat(s) will be saved.
 
-- **Export format** - HTML (Dark), HTML (Light), TXT, CSV and JSON
+- **Export format** - HTML (Dark), HTML (Light), TXT, CSV, JSON and SQLite
 
 - **Date range (after/before)** (Optional) - If set, only messages sent in the provided date range will be exported. Only one value (either after or before) is required if you want to use this option.
   > **Note**:
@@ -73,6 +74,27 @@ In this screen you can customize the following:
 
 > **Note**:
 > You need to scroll down to see all available options.
+
+## Continue exports
+
+The continue button resumes selected channels from existing JSON, HTML, CSV, or SQLite exports.
+When the selected output folder contains a `manifest.json` catalog, DCE can match selected channels to existing exports automatically.
+If no matching catalog entry is found, DCE asks you to pick the existing export file.
+
+Continuing reverse-ordered or partitioned exports is not supported.
+CSV exports that were made with a `before` date range also cannot be continued safely; continue the original JSON or SQLite export instead.
+
+## Library
+
+The Library view lists exports from the output folders that DCE has cataloged in `manifest.json`.
+Use **Scan folder** to add another export folder to the catalog.
+SQLite (`.db`) exports can also be searched from the Library; other formats are listed but are not searchable.
+
+## Convert JSON exports
+
+The conversion view converts existing JSON exports to HTML, TXT, CSV, or SQLite without connecting to Discord.
+Select one or more JSON files, choose the target formats, and pick an output folder.
+DCE warns before overwriting existing converted files.
 
 ## Settings
 

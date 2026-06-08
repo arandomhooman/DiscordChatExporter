@@ -16,6 +16,7 @@ using PowerKit.Extensions;
 
 namespace DiscordChatExporter.Core.Exporting.Conversion;
 
+// Parsed JSON export payload used as the source model for offline conversion.
 public sealed record ParsedExport(
     Guild Guild,
     Channel Channel,
@@ -26,6 +27,7 @@ public sealed record ParsedExport(
     Snowflake? Before
 );
 
+// Reads DiscordChatExporter JSON files back into export models for conversion.
 public static class JsonExportReader
 {
     public static async ValueTask<ParsedExport> ParseAsync(

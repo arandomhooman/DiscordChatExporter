@@ -1,7 +1,6 @@
 namespace DiscordChatExporter.Core.Exporting.Library;
 
-// One full-text-search hit. DatabaseFilePath identifies the source .db so the GUI can label
-// the hit by joining it back to the catalog entry for that file.
+// Full-text search result from a SQLite export, including the source database path.
 public sealed record SqliteSearchHit(
     string DatabaseFilePath,
     string MessageId,

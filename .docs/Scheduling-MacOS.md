@@ -20,7 +20,7 @@ DLLFOLDER=dceFOLDERpathhere
 FILENAME=filenamehere
 EXPORTDIRECTORY=dirhere
 EXPORTFORMAT=formathere
-# Available export formats: plaintext, htmldark, htmllight, json, csv
+# Available export formats: plaintext, htmldark, htmllight, json, csv, db
 # /\ CaSe-SeNsItIvE /\
 # You can edit the export command on line 43 if you'd like to include more options like date ranges and date format. You can't use partitioning (-p) with this script.
 
@@ -36,9 +36,11 @@ elif [[ "$EXPORTFORMAT" == "json" ]]; then
 FORMATEXT=.json
 elif [[ "$EXPORTFORMAT" == "csv" ]]; then
 FORMATEXT=.csv
+elif [[ "$EXPORTFORMAT" == "db" ]]; then
+FORMATEXT=.db
 else
 echo "$EXPORTFORMAT - Unknown export format"
-echo "Available export formats: plaintext, htmldark, htmllight, csv, json"
+echo "Available export formats: plaintext, htmldark, htmllight, csv, json, db"
 echo "/\ CaSe-SeNsItIvE /\\"
 exit 1
 fi

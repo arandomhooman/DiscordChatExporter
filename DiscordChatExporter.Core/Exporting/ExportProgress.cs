@@ -3,7 +3,7 @@ using Gress;
 
 namespace DiscordChatExporter.Core.Exporting;
 
-// Richer per-channel progress: fallback fraction, pre-filter messages walked, and timestamp position.
+// Progress snapshot for a channel export, including fraction, messages read, and current timestamp.
 public readonly record struct ExportProgress(
     Percentage Fraction,
     long MessagesRead,

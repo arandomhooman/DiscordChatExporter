@@ -13,7 +13,7 @@ $EXEPATH = "exefolderhere"
 $FILENAME = "filenamehere"
 $EXPORTDIRECTORY = "dirhere"
 $EXPORTFORMAT = "formathere"
-# Available export formats: PlainText, HtmlDark, HtmlLight, Json, Csv
+# Available export formats: PlainText, HtmlDark, HtmlLight, Json, Csv, Db
 
 cd $EXEPATH
 
@@ -26,6 +26,7 @@ ElseIf($EXPORTFORMAT -match "HtmlDark"){mv "$FILENAME.tmp" -Destination "$EXPORT
 ElseIf($EXPORTFORMAT -match "HtmlLight"){mv "$FILENAME.tmp" -Destination "$EXPORTDIRECTORY\$FILENAME-$Date.html"}
 ElseIf($EXPORTFORMAT -match "Json"){mv "$FILENAME.tmp" -Destination "$EXPORTDIRECTORY\$FILENAME-$Date.json"}
 ElseIf($EXPORTFORMAT -match "Csv"){mv "$FILENAME.tmp" -Destination "$EXPORTDIRECTORY\$FILENAME-$Date.csv"}
+ElseIf($EXPORTFORMAT -match "Db"){mv "$FILENAME.tmp" -Destination "$EXPORTDIRECTORY\$FILENAME-$Date.db"}
 exit
 ```
 

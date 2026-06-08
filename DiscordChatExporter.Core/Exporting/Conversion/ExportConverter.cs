@@ -12,6 +12,7 @@ using DiscordChatExporter.Core.Exporting.Partitioning;
 
 namespace DiscordChatExporter.Core.Exporting.Conversion;
 
+// Converts JSON exports to another offline export format without connecting to Discord.
 public static class ExportConverter
 {
     private sealed record MessageWithReferencedUsers(

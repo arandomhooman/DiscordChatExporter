@@ -2,6 +2,7 @@ using System.Collections.Generic;
 
 namespace DiscordChatExporter.Core.Exporting.Conversion;
 
+// Versioned metadata captured in JSON exports to preserve offline conversion fidelity.
 public sealed record ConversionData(
     IReadOnlyList<ConversionMember> Members,
     IReadOnlyList<ConversionRole> Roles,
@@ -19,6 +20,7 @@ public sealed record ConversionData(
         : this(members, roles, channels, []) { }
 }
 
+// Guild member metadata used when rendering converted exports offline.
 public sealed record ConversionMember(
     string Id,
     string DisplayName,
@@ -27,8 +29,10 @@ public sealed record ConversionMember(
     IReadOnlyList<string> RoleIds
 );
 
+// Guild role metadata used for offline author color and role reconstruction.
 public sealed record ConversionRole(string Id, string Name, string? ColorHex, int Position);
 
+// Channel metadata used to resolve mentions and converted export context offline.
 public sealed record ConversionChannel(
     string Id,
     string Name,
@@ -36,4 +40,5 @@ public sealed record ConversionChannel(
     bool IsVoice = false
 );
 
+// Custom emoji metadata used to render downloaded emoji assets in converted exports.
 public sealed record ConversionEmoji(string? Id, string Name, bool IsAnimated, string ImageUrl);

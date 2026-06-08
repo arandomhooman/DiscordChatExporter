@@ -68,8 +68,8 @@ You can quickly export with DCE's default settings by using just `-t token` and 
 
 #### Changing the format
 
-You can change the export format to `HtmlDark`, `HtmlLight`, `PlainText` `Json` or `Csv` with `-f format`. The default
-format is `HtmlDark`.
+You can change the export format to `HtmlDark`, `HtmlLight`, `PlainText`, `Json`, `Csv`, or `Db` with `-f format`.
+The `Db` format writes a SQLite `.db` file. The default format is `HtmlDark`.
 
 ```console
 ./DiscordChatExporter.Cli export -t "mfa.Ifrn" -c 53555 -f Json
