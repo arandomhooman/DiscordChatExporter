@@ -24,6 +24,12 @@ namespace DiscordChatExporter.Cli.Commands.Base;
 
 public abstract class ExportCommandBase : DiscordCommandBase
 {
+    private sealed class CliExportProgress(IProgress<Percentage> progress)
+        : IProgress<ExportProgress>
+    {
+        public void Report(ExportProgress value) => progress.Report(value.Fraction);
+    }
+
     [CommandOption(
         "output",
         'o',
@@ -319,9 +325,7 @@ public abstract class ExportCommandBase : DiscordCommandBase
                                     var percentageProgress = progress.ToPercentageBased();
                                     await Exporter.ExportChannelAsync(
                                         job.Request,
-                                        new System.Progress<ExportProgress>(p =>
-                                            percentageProgress.Report(p.Fraction)
-                                        ),
+                                        new CliExportProgress(percentageProgress),
                                         innerCancellationToken
                                     );
                                 }
