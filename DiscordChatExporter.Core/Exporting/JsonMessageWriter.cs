@@ -37,30 +37,31 @@ internal class JsonMessageWriter(Stream stream, ExportContext context)
         CancellationToken cancellationToken = default
     )
     {
+        var member = Context.TryGetMember(user.Id);
+        var roles = Context.GetUserRoles(user.Id);
+        var color = roles.FirstOrDefault(r => r.Color is not null)?.Color;
+
         _writer.WriteStartObject();
 
         _writer.WriteString("id", user.Id.ToString());
         _writer.WriteString("name", user.Name);
         _writer.WriteString("discriminator", user.DiscriminatorFormatted);
 
-        _writer.WriteString(
-            "nickname",
-            Context.TryGetMember(user.Id)?.DisplayName ?? user.DisplayName
-        );
+        _writer.WriteString("nickname", member?.DisplayName ?? user.DisplayName);
 
-        _writer.WriteString("color", Context.TryGetUserColor(user.Id)?.ToHexString());
+        _writer.WriteString("color", color?.ToHexString());
         _writer.WriteBoolean("isBot", user.IsBot);
 
         if (includeRoles)
         {
             _writer.WritePropertyName("roles");
-            await WriteRolesAsync(Context.GetUserRoles(user.Id), cancellationToken);
+            await WriteRolesAsync(roles, cancellationToken);
         }
 
         _writer.WriteString(
             "avatarUrl",
             await Context.ResolveAssetUrlAsync(
-                Context.TryGetMember(user.Id)?.AvatarUrl ?? user.AvatarUrl,
+                member?.AvatarUrl ?? user.AvatarUrl,
                 cancellationToken
             )
         );
