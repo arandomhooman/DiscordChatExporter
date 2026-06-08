@@ -66,6 +66,31 @@ public sealed class MessageExporterDisposeSpecs : IDisposable
             )
         );
 
+    private static User CreateUser(ulong id, string name) =>
+        new(new Snowflake(id), false, null, name, name, "");
+
+    private static Message CreateMessage(ulong id, User author, DateTimeOffset timestamp) =>
+        new(
+            new Snowflake(id),
+            MessageKind.Default,
+            MessageFlags.None,
+            author,
+            timestamp,
+            null,
+            null,
+            false,
+            "hello",
+            [],
+            [],
+            [],
+            [],
+            [],
+            null,
+            null,
+            null,
+            null
+        );
+
     [Fact]
     public async Task Dispose_with_canceled_token_does_not_create_an_empty_export()
     {
@@ -77,5 +102,33 @@ public sealed class MessageExporterDisposeSpecs : IDisposable
         await exporter.DisposeAsync(cancellation.Token);
 
         File.Exists(outputPath).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task File_stats_track_chronological_first_and_last_messages()
+    {
+        var outputPath = Path.Combine(_dir, "reverse.json");
+        await using var exporter = new MessageExporter(CreateContext(outputPath));
+        var author = CreateUser(1, "alice");
+        var older = CreateMessage(
+            100,
+            author,
+            new DateTimeOffset(2021, 07, 24, 13, 49, 13, TimeSpan.Zero)
+        );
+        var newer = CreateMessage(
+            200,
+            author,
+            new DateTimeOffset(2021, 07, 25, 10, 00, 00, TimeSpan.Zero)
+        );
+
+        await exporter.ExportMessageAsync(newer);
+        await exporter.ExportMessageAsync(older);
+        await exporter.DisposeAsync();
+
+        var file = exporter.Files.Should().ContainSingle().Subject;
+        file.FirstMessageId.Should().Be(older.Id);
+        file.FirstMessageTimestamp.Should().Be(older.Timestamp);
+        file.LastMessageId.Should().Be(newer.Id);
+        file.LastMessageTimestamp.Should().Be(newer.Timestamp);
     }
 }

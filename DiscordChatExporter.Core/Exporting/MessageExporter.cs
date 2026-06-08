@@ -143,19 +143,33 @@ internal partial class MessageExporter(ExportContext context) : IAsyncDisposable
 
         public void Record(Message message)
         {
-            if (_count == 0)
+            if (IsBefore(message, _firstTs, _firstId))
             {
                 _firstId = message.Id;
                 _firstTs = message.Timestamp;
             }
 
-            _lastId = message.Id;
-            _lastTs = message.Timestamp;
+            if (IsAfter(message, _lastTs, _lastId))
+            {
+                _lastId = message.Id;
+                _lastTs = message.Timestamp;
+            }
+
             _count++;
         }
 
         public ExportedFile ToExportedFile() =>
             new(filePath, _count, _firstId, _firstTs, _lastId, _lastTs);
+
+        private static bool IsBefore(Message message, DateTimeOffset? timestamp, Snowflake? id) =>
+            timestamp is null
+            || message.Timestamp < timestamp
+            || (message.Timestamp == timestamp && (id is null || message.Id < id.Value));
+
+        private static bool IsAfter(Message message, DateTimeOffset? timestamp, Snowflake? id) =>
+            timestamp is null
+            || message.Timestamp > timestamp
+            || (message.Timestamp == timestamp && (id is null || message.Id > id.Value));
     }
 }
 
