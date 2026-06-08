@@ -58,6 +58,33 @@ public sealed class HtmlRenderingSafetySpecs : IDisposable
             null
         );
 
+    private static Message CreateForwardedMessage(MessageSnapshot forwardedMessage) =>
+        new(
+            new Snowflake(1000),
+            MessageKind.Default,
+            MessageFlags.None,
+            CreateUser(),
+            DateTimeOffset.UnixEpoch,
+            null,
+            null,
+            false,
+            "forwarded",
+            [],
+            [],
+            [],
+            [],
+            [],
+            new MessageReference(
+                MessageReferenceKind.Forward,
+                new Snowflake(999),
+                new Snowflake(2),
+                new Snowflake(1)
+            ),
+            null,
+            forwardedMessage,
+            null
+        );
+
     private ExportContext CreateContext(string outputPath, bool shouldFormatMarkdown) =>
         new(
             new DiscordClient("fake-token"),
@@ -198,6 +225,59 @@ public sealed class HtmlRenderingSafetySpecs : IDisposable
         html.Should().Contain("href=#");
         html.Should().Contain("src=#");
         html.Should().NotContain("javascript:alert");
+    }
+
+    [Fact]
+    public async Task Html_export_renders_forwarded_embeds_and_hides_forwarded_spoiler_attachments()
+    {
+        var outputPath = Path.Combine(_dir, "forwarded.html");
+        await using (var exporter = new MessageExporter(CreateContext(outputPath, true)))
+        {
+            await exporter.ExportMessageAsync(
+                CreateForwardedMessage(
+                    new MessageSnapshot(
+                        DateTimeOffset.UnixEpoch,
+                        null,
+                        "forwarded body",
+                        [
+                            new Attachment(
+                                new Snowflake(51),
+                                "https://cdn.example/SPOILER_secret.png",
+                                "SPOILER_secret.png",
+                                null,
+                                1,
+                                1,
+                                FileSize.FromBytes(1)
+                            ),
+                        ],
+                        [
+                            new Embed(
+                                "Forwarded embed title",
+                                EmbedKind.Rich,
+                                "https://example.com/embed",
+                                null,
+                                null,
+                                null,
+                                "Forwarded embed description",
+                                [],
+                                null,
+                                [],
+                                null,
+                                null
+                            ),
+                        ],
+                        []
+                    )
+                )
+            );
+        }
+
+        var html = await File.ReadAllTextAsync(outputPath);
+
+        html.Should().Contain("Forwarded embed title");
+        html.Should().Contain("Forwarded embed description");
+        html.Should().Contain("chatlog__attachment--hidden");
+        html.Should().Contain("chatlog__attachment-spoiler-caption");
     }
 
     [Fact]
