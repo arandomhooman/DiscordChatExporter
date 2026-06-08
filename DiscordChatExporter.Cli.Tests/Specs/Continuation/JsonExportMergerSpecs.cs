@@ -305,4 +305,98 @@ public class JsonExportMergerSpecs
                 File.Delete(existing + ".bak");
         }
     }
+
+    [Fact]
+    public async Task It_prefers_fresh_conversion_data_entries_with_the_same_key()
+    {
+        var existing = await WriteAsync(
+            Existing(MsgA, 1)
+                .Replace(
+                    """
+                      "messageCount": 1
+                    """,
+                    """
+                      "messageCount": 1,
+                      "conversionData": {
+                        "schemaVersion": 1,
+                        "members": [ { "id": "10", "displayName": "Old Alice", "avatarUrl": null, "colorHex": null, "roleIds": [] } ],
+                        "roles": [ { "id": "30", "name": "old-role", "colorHex": null, "position": 1 } ],
+                        "channels": [],
+                        "emojis": [ { "id": "40", "name": "wave", "isAnimated": false, "imageUrl": "old-wave.png" } ]
+                      }
+                    """
+                )
+        );
+        var fresh = await WriteAsync(
+            Existing(MsgB, 1)
+                .Replace(
+                    """
+                      "messageCount": 1
+                    """,
+                    """
+                      "messageCount": 1,
+                      "conversionData": {
+                        "schemaVersion": 1,
+                        "members": [ { "id": "10", "displayName": "Fresh Alice", "avatarUrl": null, "colorHex": null, "roleIds": [] } ],
+                        "roles": [ { "id": "30", "name": "fresh-role", "colorHex": null, "position": 2 } ],
+                        "channels": [],
+                        "emojis": [ { "id": "40", "name": "wave", "isAnimated": false, "imageUrl": "fresh-wave.png" } ]
+                      }
+                    """
+                )
+        );
+        try
+        {
+            await JsonExportMerger.MergeAsync(existing, fresh, DateTimeOffset.UtcNow);
+
+            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(existing));
+            var conversionData = doc.RootElement.GetProperty("conversionData");
+            conversionData
+                .GetProperty("members")[0]
+                .GetProperty("displayName")
+                .GetString()
+                .Should()
+                .Be("Fresh Alice");
+            conversionData
+                .GetProperty("roles")[0]
+                .GetProperty("name")
+                .GetString()
+                .Should()
+                .Be("fresh-role");
+            conversionData
+                .GetProperty("emojis")[0]
+                .GetProperty("imageUrl")
+                .GetString()
+                .Should()
+                .Be("fresh-wave.png");
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
+    public async Task It_omits_conversion_data_when_neither_export_contains_it()
+    {
+        var existing = await WriteAsync(Existing(MsgA, 1));
+        var fresh = await WriteAsync(Existing(MsgB, 1));
+        try
+        {
+            await JsonExportMerger.MergeAsync(existing, fresh, DateTimeOffset.UtcNow);
+
+            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(existing));
+            doc.RootElement.TryGetProperty("conversionData", out _).Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
 }

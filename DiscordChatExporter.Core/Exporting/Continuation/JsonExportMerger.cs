@@ -100,7 +100,6 @@ public static class JsonExportMerger
     )
     {
         long total = 0;
-        var hasMergedConversionData = HasConversionData(existingRoot) || HasConversionData(newRoot);
         var wroteConversionData = false;
         var wroteMessages = false;
 
@@ -109,6 +108,9 @@ public static class JsonExportMerger
                 "The existing JSON export is not a top-level JSON object."
             );
 
+        var existingConversionData = GetConversionData(existingRoot);
+        var newConversionData = GetConversionData(newRoot);
+        var hasMergedConversionData = HasConversionData(existingConversionData, newConversionData);
         writer.WriteStartObject();
 
         foreach (var property in existingRoot.EnumerateObject())
@@ -146,7 +148,11 @@ public static class JsonExportMerger
                 case "conversionData":
                     if (hasMergedConversionData)
                     {
-                        WriteMergedConversionData(existingRoot, newRoot, writer);
+                        WriteMergedConversionData(
+                            existingConversionData,
+                            newConversionData,
+                            writer
+                        );
                         wroteConversionData = true;
                     }
                     break;
@@ -159,7 +165,7 @@ public static class JsonExportMerger
         }
 
         if (hasMergedConversionData && !wroteConversionData)
-            WriteMergedConversionData(existingRoot, newRoot, writer);
+            WriteMergedConversionData(existingConversionData, newConversionData, writer);
 
         if (!wroteMessages)
             throw new InvalidExportException(
@@ -198,24 +204,21 @@ public static class JsonExportMerger
         return count;
     }
 
-    private static bool HasConversionData(JsonElement root) =>
+    private static JsonElement GetConversionData(JsonElement root) =>
         root.ValueKind == JsonValueKind.Object
         && root.TryGetProperty("conversionData", out var conversionData)
-        && conversionData.ValueKind == JsonValueKind.Object;
+            ? conversionData
+            : default;
+
+    private static bool HasConversionData(JsonElement existing, JsonElement fresh) =>
+        existing.ValueKind == JsonValueKind.Object || fresh.ValueKind == JsonValueKind.Object;
 
     private static void WriteMergedConversionData(
-        JsonElement existingRoot,
-        JsonElement newRoot,
+        JsonElement existing,
+        JsonElement fresh,
         Utf8JsonWriter writer
     )
     {
-        var existing = existingRoot.TryGetProperty("conversionData", out var existingData)
-            ? existingData
-            : default;
-        var fresh = newRoot.TryGetProperty("conversionData", out var freshData)
-            ? freshData
-            : default;
-
         writer.WritePropertyName("conversionData");
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", ConversionData.CurrentSchemaVersion);
