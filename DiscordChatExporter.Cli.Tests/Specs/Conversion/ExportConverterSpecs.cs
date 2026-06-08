@@ -362,6 +362,163 @@ public sealed class ExportConverterSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Converter_does_not_emit_local_asset_urls_from_json()
+    {
+        var jsonPath = await WriteRawJsonAsync(
+            "unsafe-asset-urls.json",
+            """
+            {
+              "guild": {
+                "id": "1",
+                "name": "Test Guild",
+                "iconUrl": "file:///C:/Users/ExampleUser/secret-guild.png"
+              },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "iconUrl": "C:/Users/ExampleUser/secret-channel.png",
+                "topic": "topic"
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "unsafe assets <:local:12345>",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": "file:///C:/Users/ExampleUser/secret-avatar.png"
+                  },
+                  "attachments": [
+                    {
+                      "id": "20",
+                      "url": "C:/Users/ExampleUser/secret-attachment.png",
+                      "fileName": "secret-attachment.png",
+                      "description": null,
+                      "width": 128,
+                      "height": 128,
+                      "fileSizeBytes": 1234
+                    }
+                  ],
+                  "embeds": [
+                    {
+                      "title": "embed",
+                      "type": "Rich",
+                      "url": "https://example.com/page",
+                      "color": null,
+                      "description": "embed body",
+                      "thumbnail": {
+                        "url": "file:///C:/Users/ExampleUser/secret-thumb.png",
+                        "canonicalUrl": "file:///C:/Users/ExampleUser/secret-thumb-canonical.png",
+                        "width": 64,
+                        "height": 64
+                      },
+                      "images": [
+                        {
+                          "url": "//server/share/secret-image.png",
+                          "canonicalUrl": "/etc/secret-image.png",
+                          "width": 64,
+                          "height": 64
+                        }
+                      ],
+                      "footer": {
+                        "text": "footer",
+                        "iconUrl": "file:///C:/Users/ExampleUser/secret-footer.png",
+                        "iconCanonicalUrl": "file:///C:/Users/ExampleUser/secret-footer-canonical.png"
+                      },
+                      "inlineEmojis": [
+                        {
+                          "id": "12345",
+                          "name": "local",
+                          "code": "local",
+                          "isAnimated": false,
+                          "imageUrl": "C:/Users/ExampleUser/secret-emoji.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "stickers": [
+                    {
+                      "id": "30",
+                      "name": "sticker",
+                      "format": "Png",
+                      "sourceUrl": "file:///C:/Users/ExampleUser/secret-sticker.png"
+                    }
+                  ],
+                  "reactions": [
+                    {
+                      "emoji": {
+                        "id": "12345",
+                        "name": "local",
+                        "isAnimated": false,
+                        "imageUrl": "file:///C:/Users/ExampleUser/secret-reaction.png"
+                      },
+                      "count": 1
+                    }
+                  ],
+                  "mentions": [],
+                  "inlineEmojis": [
+                    {
+                      "id": "12345",
+                      "name": "local",
+                      "code": "local",
+                      "isAnimated": false,
+                      "imageUrl": "file:///C:/Users/ExampleUser/secret-inline.png"
+                    }
+                  ]
+                }
+              ],
+              "messageCount": 1,
+              "conversionData": {
+                "schemaVersion": 1,
+                "members": [
+                  {
+                    "id": "10",
+                    "displayName": "alice",
+                    "avatarUrl": "file:///C:/Users/ExampleUser/secret-member.png",
+                    "colorHex": null,
+                    "roleIds": []
+                  }
+                ],
+                "roles": [],
+                "channels": [],
+                "emojis": [
+                  {
+                    "id": "12345",
+                    "name": "local",
+                    "isAnimated": false,
+                    "imageUrl": "file:///C:/Users/ExampleUser/secret-conversion-emoji.png"
+                  }
+                ]
+              }
+            }
+            """
+        );
+        var htmlOut = Path.Combine(_dir, "unsafe-asset-urls.html");
+
+        await ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark);
+
+        var html = await File.ReadAllTextAsync(htmlOut);
+        html.Should().NotContain("file:", "local file URIs from converted JSON are unsafe");
+        html.Should().NotContain("C:/Users/ExampleUser", "absolute Windows paths are unsafe");
+        html.Should().NotContain("//server/share", "protocol-relative UNC-style URLs are unsafe");
+        html.Should().NotContain("/etc/secret", "rooted Unix-style paths are unsafe");
+        html.Should().Contain("https://example.com/page", "normal embed links are not asset URLs");
+    }
+
+    [Fact]
     public async Task Converter_uses_conversion_data_channel_kind_for_channel_mentions()
     {
         var jsonPath = await WriteRawJsonAsync(

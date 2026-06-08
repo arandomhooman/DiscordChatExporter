@@ -112,7 +112,7 @@ public static class JsonExportReader
         new(
             ParseSnowflake(json.GetProperty("id")),
             GetString(json, "name"),
-            GetString(json, "iconUrl")
+            GetAssetUrl(json, "iconUrl")
         );
 
     private static Channel ParseChannel(JsonElement json, Snowflake guildId)
@@ -139,7 +139,7 @@ public static class JsonExportReader
             parent,
             GetString(json, "name"),
             null,
-            GetStringOrNull(json, "iconUrl"),
+            GetAssetUrlOrNull(json, "iconUrl"),
             GetStringOrNull(json, "topic"),
             false,
             null
@@ -186,13 +186,13 @@ public static class JsonExportReader
                 : null,
             GetString(json, "name"),
             GetStringOrNull(json, "nickname") ?? GetString(json, "name"),
-            GetStringOrNull(json, "avatarUrl") ?? ""
+            GetAssetUrl(json, "avatarUrl")
         );
 
     private static Attachment ParseAttachment(JsonElement json) =>
         new(
             ParseSnowflake(json.GetProperty("id")),
-            GetString(json, "url"),
+            GetAssetUrl(json, "url"),
             GetString(json, "fileName"),
             GetStringOrNull(json, "description"),
             GetInt32OrNull(json, "width"),
@@ -273,22 +273,22 @@ public static class JsonExportReader
         new(
             GetStringOrNull(json, "name"),
             GetStringOrNull(json, "url"),
-            GetStringOrNull(json, "iconCanonicalUrl") ?? GetStringOrNull(json, "iconUrl"),
-            GetStringOrNull(json, "iconUrl")
+            GetAssetUrlOrNull(json, "iconCanonicalUrl") ?? GetAssetUrlOrNull(json, "iconUrl"),
+            GetAssetUrlOrNull(json, "iconUrl")
         );
 
     private static EmbedImage ParseEmbedImage(JsonElement json) =>
         new(
-            GetStringOrNull(json, "canonicalUrl") ?? GetStringOrNull(json, "url"),
-            GetStringOrNull(json, "url"),
+            GetAssetUrlOrNull(json, "canonicalUrl") ?? GetAssetUrlOrNull(json, "url"),
+            GetAssetUrlOrNull(json, "url"),
             GetInt32OrNull(json, "width"),
             GetInt32OrNull(json, "height")
         );
 
     private static EmbedVideo ParseEmbedVideo(JsonElement json) =>
         new(
-            GetStringOrNull(json, "canonicalUrl") ?? GetStringOrNull(json, "url"),
-            GetStringOrNull(json, "url"),
+            GetAssetUrlOrNull(json, "canonicalUrl") ?? GetAssetUrlOrNull(json, "url"),
+            GetAssetUrlOrNull(json, "url"),
             GetInt32OrNull(json, "width"),
             GetInt32OrNull(json, "height")
         );
@@ -296,8 +296,8 @@ public static class JsonExportReader
     private static EmbedFooter ParseEmbedFooter(JsonElement json) =>
         new(
             GetString(json, "text"),
-            GetStringOrNull(json, "iconCanonicalUrl") ?? GetStringOrNull(json, "iconUrl"),
-            GetStringOrNull(json, "iconUrl")
+            GetAssetUrlOrNull(json, "iconCanonicalUrl") ?? GetAssetUrlOrNull(json, "iconUrl"),
+            GetAssetUrlOrNull(json, "iconUrl")
         );
 
     private static EmbedField ParseEmbedField(JsonElement json) =>
@@ -312,7 +312,7 @@ public static class JsonExportReader
             ParseSnowflake(json.GetProperty("id")),
             GetString(json, "name"),
             ParseEnum(GetString(json, "format"), StickerFormat.Png),
-            GetString(json, "sourceUrl")
+            GetAssetUrl(json, "sourceUrl")
         );
 
     private static Reaction ParseReaction(JsonElement json) =>
@@ -327,7 +327,7 @@ public static class JsonExportReader
             GetBoolean(json, "isAnimated")
         )
         {
-            ImageUrlOverride = GetStringOrNull(json, "imageUrl"),
+            ImageUrlOverride = GetAssetUrlOrNull(json, "imageUrl"),
         };
 
     private static MessageReference ParseMessageReference(JsonElement json) =>
@@ -363,7 +363,7 @@ public static class JsonExportReader
                 member => new ConversionMember(
                     GetString(member, "id"),
                     GetString(member, "displayName"),
-                    GetStringOrNull(member, "avatarUrl"),
+                    GetAssetUrlOrNull(member, "avatarUrl"),
                     GetStringOrNull(member, "colorHex"),
                     ParseArray(member, "roleIds", roleId => GetString(roleId))
                 )
@@ -396,7 +396,7 @@ public static class JsonExportReader
             GetStringOrNull(json, "id"),
             GetString(json, "name"),
             GetBoolean(json, "isAnimated"),
-            GetString(json, "imageUrl")
+            GetAssetUrl(json, "imageUrl")
         );
 
     private static IReadOnlyList<ConversionEmoji> ParseInlineEmojis(JsonElement json)
@@ -523,6 +523,46 @@ public static class JsonExportReader
         && property.ValueKind != JsonValueKind.Null
             ? GetString(property)
             : null;
+
+    private static string GetAssetUrl(JsonElement json, string propertyName) =>
+        GetAssetUrlOrNull(json, propertyName) ?? "";
+
+    private static string? GetAssetUrlOrNull(JsonElement json, string propertyName) =>
+        SanitizeAssetUrl(GetStringOrNull(json, propertyName));
+
+    private static string? SanitizeAssetUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        var trimmedUrl = url.Trim();
+        if (trimmedUrl.StartsWith("//", StringComparison.Ordinal) || Path.IsPathRooted(trimmedUrl))
+            return null;
+
+        if (Uri.TryCreate(trimmedUrl, UriKind.Absolute, out var absoluteUri))
+            return absoluteUri.Scheme is "http" or "https" ? trimmedUrl : null;
+
+        if (!Uri.TryCreate(trimmedUrl, UriKind.Relative, out _))
+            return null;
+
+        foreach (var segment in trimmedUrl.Replace('\\', '/').Split('/'))
+        {
+            string unescapedSegment;
+            try
+            {
+                unescapedSegment = Uri.UnescapeDataString(segment);
+            }
+            catch (UriFormatException)
+            {
+                return null;
+            }
+
+            if (unescapedSegment == "..")
+                return null;
+        }
+
+        return trimmedUrl;
+    }
 
     private static bool GetBoolean(JsonElement json, string propertyName) =>
         json.TryGetProperty(propertyName, out var property)
