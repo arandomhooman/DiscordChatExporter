@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -43,6 +44,11 @@ public partial class LibraryViewModel : ViewModelBase
     public ObservableCollection<ManifestEntry> Entries { get; } = [];
 
     public ObservableCollection<LibrarySearchResult> SearchResults { get; } = [];
+
+    internal static Task<IReadOnlyList<SqliteSearchHit>> RunSearchOffUiThreadAsync(
+        Func<ValueTask<IReadOnlyList<SqliteSearchHit>>> searchAsync,
+        CancellationToken cancellationToken = default
+    ) => Task.Run(async () => await searchAsync(), cancellationToken);
 
     [ObservableProperty]
     public partial string? SearchQuery { get; set; }
@@ -132,7 +138,9 @@ public partial class LibraryViewModel : ViewModelBase
         IsBusy = true;
         try
         {
-            var hits = await SqliteExportReader.SearchAcrossAsync(dbPaths, query, 200);
+            var hits = await RunSearchOffUiThreadAsync(() =>
+                SqliteExportReader.SearchAcrossAsync(dbPaths, query, 200)
+            );
 
             // Label each hit by joining its source db path back to the cached catalog lookup.
             foreach (var hit in hits)
