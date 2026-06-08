@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,7 +38,8 @@ public static partial class HtmlExportMerger
         var oldHtml = await File.ReadAllTextAsync(existingFilePath, cancellationToken);
         var newHtml = await File.ReadAllTextAsync(newMessagesFilePath, cancellationToken);
 
-        var oldIds = HtmlExportInspector.ExtractMessageIdStrings(oldHtml).ToHashSet();
+        var oldIdStrings = HtmlExportInspector.ExtractMessageIdStrings(oldHtml).ToArray();
+        var oldIds = oldIdStrings.ToHashSet();
 
         // A malformed fresh export (no chatlog container at all) is a real failure — abort so we
         // never replace the original with a no-op against garbage input. A WELL-FORMED fresh export
@@ -49,19 +51,39 @@ public static partial class HtmlExportMerger
 
         var newSlice = ExtractGroups(newHtml);
         newSlice = DedupeContainers(newSlice, oldIds);
+        var newIdStrings = HtmlExportInspector.ExtractMessageIdStrings(newSlice).ToArray();
 
         var spliceAt = FindChatlogCloseBeforePostamble(oldHtml);
-        var merged = oldHtml[..spliceAt] + newSlice + oldHtml[spliceAt..];
+        var totalCount = oldIdStrings.Length + newIdStrings.Length;
+        var countMatch =
+            FindCountInPostamble(oldHtml)
+            ?? throw new InvalidExportException(
+                "Could not locate the message count in the HTML export's postamble."
+            );
+        var countReplacement =
+            countMatch.Groups[1].Value + totalCount.ToString("n0") + countMatch.Groups[3].Value;
 
-        var totalCount = HtmlExportInspector.ExtractMessageIdStrings(merged).Count;
-        merged = RewriteCount(merged, totalCount);
-
-        Validate(merged);
+        ValidateParts(oldHtml, newSlice, oldIdStrings, newIdStrings, totalCount);
 
         var tempPath = existingFilePath + ".merging.tmp";
         try
         {
-            await File.WriteAllTextAsync(tempPath, merged, cancellationToken);
+            await using var stream = File.Create(tempPath);
+            await using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            {
+                await writer.WriteAsync(oldHtml.AsMemory(0, spliceAt), cancellationToken);
+                await writer.WriteAsync(newSlice.AsMemory(), cancellationToken);
+                await writer.WriteAsync(
+                    oldHtml.AsMemory(spliceAt, countMatch.Index - spliceAt),
+                    cancellationToken
+                );
+                await writer.WriteAsync(countReplacement.AsMemory(), cancellationToken);
+                await writer.WriteAsync(
+                    oldHtml.AsMemory(countMatch.Index + countMatch.Length),
+                    cancellationToken
+                );
+            }
+
             AtomicFile.ReplaceWithBackupCleanup(tempPath, existingFilePath);
         }
         catch
@@ -236,20 +258,6 @@ public static partial class HtmlExportMerger
         return match.Success ? match : null;
     }
 
-    // Rewrite the recomputed total into the postamble count, in the same "n0" form the renderer
-    // used. The count is a validated invariant (see Validate), not cosmetic: a real export always
-    // carries it, so its absence means the input isn't a recognizable export and we abort.
-    private static string RewriteCount(string html, long total)
-    {
-        var match =
-            FindCountInPostamble(html)
-            ?? throw new InvalidExportException(
-                "Could not locate the message count in the HTML export's postamble."
-            );
-        var replacement = match.Groups[1].Value + total.ToString("n0") + match.Groups[3].Value;
-        return html[..match.Index] + replacement + html[(match.Index + match.Length)..];
-    }
-
     // Key safety net. If any of these fail the merge is aborted (caller keeps the .bak/original).
     // These structural invariants — exactly one container, exactly one postamble, no duplicate ids,
     // ascending ids — are what would break if the splice/dedupe logic mangled the file, so they are
@@ -258,18 +266,29 @@ public static partial class HtmlExportMerger
     //
     // Ascending is asserted because the export — and this append-at-end splice — assume chronological
     // order (the only mode the continuation feature produces). Reverse-order exports are out of scope.
-    private static void Validate(string merged)
+    private static void ValidateParts(
+        string oldHtml,
+        string newSlice,
+        IReadOnlyList<string> oldIdStrings,
+        IReadOnlyList<string> newIdStrings,
+        long totalCount
+    )
     {
-        if (ChatlogOpenRegex().Matches(merged).Count != 1)
+        if (ChatlogOpenRegex().Matches(oldHtml).Count != 1)
             throw new InvalidExportException(
                 "HTML merge produced an invalid file (chatlog container count)."
             );
-        if (PostambleOpenRegex().Matches(merged).Count != 1)
+        if (PostambleOpenRegex().Matches(oldHtml).Count != 1)
             throw new InvalidExportException(
                 "HTML merge produced an invalid file (postamble count)."
             );
+        if (ChatlogOpenRegex().IsMatch(newSlice) || PostambleOpenRegex().IsMatch(newSlice))
+            throw new InvalidExportException(
+                "HTML merge produced an invalid file (unexpected nested export boundary)."
+            );
+
         var ids = new List<ulong>();
-        foreach (var idString in HtmlExportInspector.ExtractMessageIdStrings(merged))
+        foreach (var idString in oldIdStrings.Concat(newIdStrings))
         {
             if (!ulong.TryParse(idString, out var id))
                 throw new InvalidExportException("HTML merge produced an invalid message id.");
@@ -283,21 +302,12 @@ public static partial class HtmlExportMerger
             if (ids[i] < ids[i - 1])
                 throw new InvalidExportException("HTML merge produced out-of-order message ids.");
 
-        // Count-consistency: the postamble's DISPLAYED count must equal the actual id count. Rather
-        // than parse the displayed digits (culture/grouping-separator hazard), we round-trip the
-        // expected value through the same "n0" formatting RewriteCount used and string-compare — so
-        // this is exact by construction. This catches a count that was written to the wrong place
-        // (e.g. into message content) or never updated. A no-op merge still passes (count unchanged).
-        var countMatch =
-            FindCountInPostamble(merged)
-            ?? throw new InvalidExportException(
-                "HTML merge produced a file with no message count in the postamble."
-            );
-        var displayed = countMatch.Groups[2].Value;
-        var expected = ((long)ids.Count).ToString("n0");
-        if (displayed != expected)
+        // Count-consistency: the computed postamble count must equal the actual id count. The
+        // postamble text is written from this same total after validation, so a no-op merge still
+        // passes and malformed parts abort before replacement.
+        if (totalCount != ids.Count)
             throw new InvalidExportException(
-                $"HTML merge produced an inconsistent message count (postamble shows '{displayed}', expected '{expected}')."
+                $"HTML merge produced an inconsistent message count (computed '{totalCount}', expected '{ids.Count}')."
             );
     }
 }
