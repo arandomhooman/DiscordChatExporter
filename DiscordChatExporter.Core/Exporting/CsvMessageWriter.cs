@@ -115,6 +115,11 @@ internal partial class CsvMessageWriter
 {
     private static string CsvEncode(string value)
     {
+        if (value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r')
+        {
+            value = '\'' + value;
+        }
+
         value = value.Replace("\"", "\"\"", StringComparison.Ordinal);
         return $"\"{value}\"";
     }
