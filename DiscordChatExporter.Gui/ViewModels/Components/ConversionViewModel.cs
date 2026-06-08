@@ -19,7 +19,9 @@ public sealed partial class ConversionViewModel(
     DialogManager dialogManager,
     LocalizationManager localizationManager,
     Func<FilePickerFileType[], Task<IReadOnlyList<string>>>? promptMultipleFilePathsAsync = null,
-    Func<string, Task<string?>>? promptDirectoryPathAsync = null
+    Func<string, Task<string?>>? promptDirectoryPathAsync = null,
+    Func<string, string, ExportFormat, CancellationToken, ValueTask<ExportResult>>? convertAsync =
+        null
 ) : ViewModelBase
 {
     private readonly Func<
@@ -31,6 +33,13 @@ public sealed partial class ConversionViewModel(
     private readonly Func<string, Task<string?>> _promptDirectoryPathAsync =
         promptDirectoryPathAsync
         ?? (defaultDirPath => dialogManager.PromptDirectoryPathAsync(defaultDirPath));
+    private readonly Func<
+        string,
+        string,
+        ExportFormat,
+        CancellationToken,
+        ValueTask<ExportResult>
+    > _convertAsync = convertAsync ?? ExportConverter.ConvertAsync;
 
     private const string ConvertedMessage = "Converted";
     private const string CanceledMessage = "Canceled";
@@ -245,7 +254,7 @@ public sealed partial class ConversionViewModel(
                     {
                         await RunConversionWorkOffUiThreadAsync(
                             () =>
-                                ExportConverter.ConvertAsync(
+                                _convertAsync(
                                     job.SourceFilePath,
                                     job.OutputFilePath,
                                     job.Format,
@@ -270,6 +279,7 @@ public sealed partial class ConversionViewModel(
                     }
                     catch (Exception ex)
                     {
+                        DeletePartialOutputFile(job.OutputFilePath);
                         Results.Add(
                             new ConversionResultRow(
                                 job.SourceFilePath,
@@ -294,6 +304,18 @@ public sealed partial class ConversionViewModel(
         {
             EndCancelableOperation();
             IsBusy = false;
+        }
+    }
+
+    private static void DeletePartialOutputFile(string filePath)
+    {
+        try
+        {
+            File.Delete(filePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best-effort cleanup: keep the original conversion failure visible.
         }
     }
 

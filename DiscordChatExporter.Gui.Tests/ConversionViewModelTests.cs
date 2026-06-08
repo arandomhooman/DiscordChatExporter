@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
@@ -104,8 +105,20 @@ public sealed class ConversionViewModelTests : IDisposable
         return path;
     }
 
-    private ConversionViewModel CreateViewModel() =>
-        new(new DialogManager(), new LocalizationManager(new SettingsService()))
+    private ConversionViewModel CreateViewModel(
+        Func<
+            string,
+            string,
+            ExportFormat,
+            CancellationToken,
+            ValueTask<ExportResult>
+        >? convertAsync = null
+    ) =>
+        new(
+            new DialogManager(),
+            new LocalizationManager(new SettingsService()),
+            convertAsync: convertAsync
+        )
         {
             OutputFolderPath = _dir,
             IsHtmlDarkSelected = false,
@@ -255,6 +268,37 @@ public sealed class ConversionViewModelTests : IDisposable
         (await File.ReadAllTextAsync(existingOutput, TestContext.Current.CancellationToken))
             .Should()
             .Be("do not replace");
+    }
+
+    [Fact]
+    public async Task Convert_deletes_partial_output_after_failed_conversion()
+    {
+        var json = WriteJson("chat.json", "from json");
+        var outputPath = Path.Combine(_dir, "chat.csv");
+        var shouldFail = true;
+        var viewModel = CreateViewModel(
+            convertAsync: (_, outputFilePath, _, _) =>
+            {
+                File.WriteAllText(outputFilePath, shouldFail ? "partial" : "complete");
+                if (shouldFail)
+                    throw new IOException("conversion failed");
+
+                return ValueTask.FromResult(new ExportResult([], 0, 0));
+            }
+        );
+        viewModel.IsCsvSelected = true;
+        viewModel.SourceFilePaths.Add(json);
+
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        viewModel.Results.Should().ContainSingle().Which.IsSuccess.Should().BeFalse();
+        File.Exists(outputPath).Should().BeFalse();
+
+        shouldFail = false;
+        await viewModel.ConvertCommand.ExecuteAsync(null);
+
+        viewModel.Results.Should().ContainSingle().Which.IsSuccess.Should().BeTrue();
+        File.ReadAllText(outputPath).Should().Be("complete");
     }
 
     [Fact]
