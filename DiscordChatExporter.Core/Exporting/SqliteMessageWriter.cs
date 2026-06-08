@@ -78,6 +78,11 @@ internal class SqliteMessageWriter : MessageWriter
     private readonly HashSet<string> _seenAuthorIds = new(StringComparer.Ordinal);
     private SqliteConnection? _connection;
     private SqliteTransaction? _transaction;
+    private SqliteCommand? _insertMessageCommand;
+    private SqliteCommand? _insertMessageFtsCommand;
+    private SqliteCommand? _insertAttachmentCommand;
+    private SqliteCommand? _insertReactionCommand;
+    private SqliteCommand? _insertAuthorCommand;
 
     public SqliteMessageWriter(string databaseFilePath, ExportContext context)
         : base(Stream.Null, context)
@@ -92,6 +97,25 @@ internal class SqliteMessageWriter : MessageWriter
 
     private static void AddParameter(SqliteCommand command, string name, object? value) =>
         command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+
+    private static void AddReusableParameter(SqliteCommand command, string name) =>
+        command.Parameters.AddWithValue(name, DBNull.Value);
+
+    private static void SetParameter(SqliteCommand command, string name, object? value) =>
+        command.Parameters[name].Value = value ?? DBNull.Value;
+
+    private SqliteCommand CreatePreparedCommand(string commandText, params string[] parameterNames)
+    {
+        var command = _connection!.CreateCommand();
+        command.Transaction = _transaction;
+        command.CommandText = commandText;
+
+        foreach (var parameterName in parameterNames)
+            AddReusableParameter(command, parameterName);
+
+        command.Prepare();
+        return command;
+    }
 
     public override async ValueTask WritePreambleAsync(
         CancellationToken cancellationToken = default
@@ -161,6 +185,67 @@ internal class SqliteMessageWriter : MessageWriter
             Context.NormalizeDate(DateTimeOffset.UtcNow).ToString("o", CultureInfo.InvariantCulture)
         );
         await command.ExecuteNonQueryAsync(cancellationToken);
+
+        _insertMessageCommand = CreatePreparedCommand(
+            """
+            INSERT OR IGNORE INTO messages
+                (id, type, timestamp, timestamp_edited, call_ended_timestamp,
+                 is_pinned, content, author_id, reference_message_id)
+            VALUES
+                ($id, $type, $timestamp, $timestampEdited, $callEnded,
+                 $isPinned, $content, $authorId, $referenceMessageId);
+            """,
+            "$id",
+            "$type",
+            "$timestamp",
+            "$timestampEdited",
+            "$callEnded",
+            "$isPinned",
+            "$content",
+            "$authorId",
+            "$referenceMessageId"
+        );
+        _insertMessageFtsCommand = CreatePreparedCommand(
+            "INSERT INTO messages_fts (content, message_id) VALUES ($content, $messageId);",
+            "$content",
+            "$messageId"
+        );
+        _insertAttachmentCommand = CreatePreparedCommand(
+            """
+            INSERT INTO attachments (message_id, id, url, file_name, file_size_bytes)
+            VALUES ($messageId, $id, $url, $fileName, $fileSizeBytes);
+            """,
+            "$messageId",
+            "$id",
+            "$url",
+            "$fileName",
+            "$fileSizeBytes"
+        );
+        _insertReactionCommand = CreatePreparedCommand(
+            """
+            INSERT INTO reactions (message_id, emoji_id, emoji_name, emoji_code, is_animated, count)
+            VALUES ($messageId, $emojiId, $emojiName, $emojiCode, $isAnimated, $count);
+            """,
+            "$messageId",
+            "$emojiId",
+            "$emojiName",
+            "$emojiCode",
+            "$isAnimated",
+            "$count"
+        );
+        _insertAuthorCommand = CreatePreparedCommand(
+            """
+            INSERT OR IGNORE INTO authors (id, name, discriminator, nickname, color, is_bot, avatar_url)
+            VALUES ($id, $name, $discriminator, $nickname, $color, $isBot, $avatarUrl);
+            """,
+            "$id",
+            "$name",
+            "$discriminator",
+            "$nickname",
+            "$color",
+            "$isBot",
+            "$avatarUrl"
+        );
     }
 
     public override async ValueTask WriteMessageAsync(
@@ -176,88 +261,73 @@ internal class SqliteMessageWriter : MessageWriter
 
         await WriteAuthorAsync(message.Author, cancellationToken);
 
-        int messageRows;
-        using (var command = _connection!.CreateCommand())
-        {
-            command.Transaction = _transaction;
-            // OR IGNORE: a repeated message id (e.g. a pagination-boundary duplicate) is skipped
-            // rather than aborting the whole channel, matching how the other writers tolerate it.
-            command.CommandText = """
-                INSERT OR IGNORE INTO messages
-                    (id, type, timestamp, timestamp_edited, call_ended_timestamp,
-                     is_pinned, content, author_id, reference_message_id)
-                VALUES
-                    ($id, $type, $timestamp, $timestampEdited, $callEnded,
-                     $isPinned, $content, $authorId, $referenceMessageId);
-                """;
-            AddParameter(command, "$id", message.Id.ToString());
-            AddParameter(command, "$type", message.Kind.ToString());
-            AddParameter(
-                command,
-                "$timestamp",
-                Context.NormalizeDate(message.Timestamp).ToString("o", CultureInfo.InvariantCulture)
-            );
-            AddParameter(command, "$timestampEdited", NormalizeOrNull(message.EditedTimestamp));
-            AddParameter(command, "$callEnded", NormalizeOrNull(message.CallEndedTimestamp));
-            AddParameter(command, "$isPinned", message.IsPinned ? 1 : 0);
-            AddParameter(command, "$content", content);
-            AddParameter(command, "$authorId", message.Author.Id.ToString());
-            AddParameter(command, "$referenceMessageId", message.Reference?.MessageId?.ToString());
-            messageRows = await command.ExecuteNonQueryAsync(cancellationToken);
-        }
+        var insertMessageCommand = _insertMessageCommand!;
+        // OR IGNORE: a repeated message id (e.g. a pagination-boundary duplicate) is skipped
+        // rather than aborting the whole channel, matching how the other writers tolerate it.
+        SetParameter(insertMessageCommand, "$id", message.Id.ToString());
+        SetParameter(insertMessageCommand, "$type", message.Kind.ToString());
+        SetParameter(
+            insertMessageCommand,
+            "$timestamp",
+            Context.NormalizeDate(message.Timestamp).ToString("o", CultureInfo.InvariantCulture)
+        );
+        SetParameter(
+            insertMessageCommand,
+            "$timestampEdited",
+            NormalizeOrNull(message.EditedTimestamp)
+        );
+        SetParameter(
+            insertMessageCommand,
+            "$callEnded",
+            NormalizeOrNull(message.CallEndedTimestamp)
+        );
+        SetParameter(insertMessageCommand, "$isPinned", message.IsPinned ? 1 : 0);
+        SetParameter(insertMessageCommand, "$content", content);
+        SetParameter(insertMessageCommand, "$authorId", message.Author.Id.ToString());
+        SetParameter(
+            insertMessageCommand,
+            "$referenceMessageId",
+            message.Reference?.MessageId?.ToString()
+        );
+        var messageRows = await insertMessageCommand.ExecuteNonQueryAsync(cancellationToken);
 
         // The message id already existed and was ignored above; skip its dependent rows so the
         // FTS index, attachments, and reactions don't accumulate duplicates for it.
         if (messageRows == 0)
             return;
 
-        using (var command = _connection!.CreateCommand())
-        {
-            command.Transaction = _transaction;
-            command.CommandText =
-                "INSERT INTO messages_fts (content, message_id) VALUES ($content, $messageId);";
-            AddParameter(command, "$content", content);
-            AddParameter(command, "$messageId", message.Id.ToString());
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
+        var insertMessageFtsCommand = _insertMessageFtsCommand!;
+        SetParameter(insertMessageFtsCommand, "$content", content);
+        SetParameter(insertMessageFtsCommand, "$messageId", message.Id.ToString());
+        await insertMessageFtsCommand.ExecuteNonQueryAsync(cancellationToken);
 
         foreach (var attachment in message.Attachments)
         {
-            using var command = _connection!.CreateCommand();
-            command.Transaction = _transaction;
-            command.CommandText = """
-                INSERT INTO attachments (message_id, id, url, file_name, file_size_bytes)
-                VALUES ($messageId, $id, $url, $fileName, $fileSizeBytes);
-                """;
-            AddParameter(command, "$messageId", message.Id.ToString());
-            AddParameter(command, "$id", attachment.Id.ToString());
-            AddParameter(
-                command,
+            var insertAttachmentCommand = _insertAttachmentCommand!;
+            SetParameter(insertAttachmentCommand, "$messageId", message.Id.ToString());
+            SetParameter(insertAttachmentCommand, "$id", attachment.Id.ToString());
+            SetParameter(
+                insertAttachmentCommand,
                 "$url",
                 await Context.ResolveAssetUrlAsync(attachment.Url, cancellationToken)
             );
-            AddParameter(command, "$fileName", attachment.FileName);
-            AddParameter(command, "$fileSizeBytes", attachment.FileSize.TotalBytes);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            SetParameter(insertAttachmentCommand, "$fileName", attachment.FileName);
+            SetParameter(insertAttachmentCommand, "$fileSizeBytes", attachment.FileSize.TotalBytes);
+            await insertAttachmentCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
         // Reactions: counts only. We deliberately do NOT call GetMessageReactionsAsync
         // (the per-user fetch), keeping the writer network-free.
         foreach (var reaction in message.Reactions)
         {
-            using var command = _connection!.CreateCommand();
-            command.Transaction = _transaction;
-            command.CommandText = """
-                INSERT INTO reactions (message_id, emoji_id, emoji_name, emoji_code, is_animated, count)
-                VALUES ($messageId, $emojiId, $emojiName, $emojiCode, $isAnimated, $count);
-                """;
-            AddParameter(command, "$messageId", message.Id.ToString());
-            AddParameter(command, "$emojiId", reaction.Emoji.Id?.ToString());
-            AddParameter(command, "$emojiName", reaction.Emoji.Name);
-            AddParameter(command, "$emojiCode", reaction.Emoji.Code);
-            AddParameter(command, "$isAnimated", reaction.Emoji.IsAnimated ? 1 : 0);
-            AddParameter(command, "$count", reaction.Count);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            var insertReactionCommand = _insertReactionCommand!;
+            SetParameter(insertReactionCommand, "$messageId", message.Id.ToString());
+            SetParameter(insertReactionCommand, "$emojiId", reaction.Emoji.Id?.ToString());
+            SetParameter(insertReactionCommand, "$emojiName", reaction.Emoji.Name);
+            SetParameter(insertReactionCommand, "$emojiCode", reaction.Emoji.Code);
+            SetParameter(insertReactionCommand, "$isAnimated", reaction.Emoji.IsAnimated ? 1 : 0);
+            SetParameter(insertReactionCommand, "$count", reaction.Count);
+            await insertReactionCommand.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 
@@ -267,32 +337,31 @@ internal class SqliteMessageWriter : MessageWriter
         if (!_seenAuthorIds.Add(user.Id.ToString()))
             return;
 
-        using var command = _connection!.CreateCommand();
-        command.Transaction = _transaction;
+        var insertAuthorCommand = _insertAuthorCommand!;
         // OR IGNORE dedupes by the author id primary key.
-        command.CommandText = """
-            INSERT OR IGNORE INTO authors (id, name, discriminator, nickname, color, is_bot, avatar_url)
-            VALUES ($id, $name, $discriminator, $nickname, $color, $isBot, $avatarUrl);
-            """;
-        AddParameter(command, "$id", user.Id.ToString());
-        AddParameter(command, "$name", user.Name);
-        AddParameter(command, "$discriminator", user.DiscriminatorFormatted);
-        AddParameter(
-            command,
+        SetParameter(insertAuthorCommand, "$id", user.Id.ToString());
+        SetParameter(insertAuthorCommand, "$name", user.Name);
+        SetParameter(insertAuthorCommand, "$discriminator", user.DiscriminatorFormatted);
+        SetParameter(
+            insertAuthorCommand,
             "$nickname",
             Context.TryGetMember(user.Id)?.DisplayName ?? user.DisplayName
         );
-        AddParameter(command, "$color", Context.TryGetUserColor(user.Id)?.ToHexString());
-        AddParameter(command, "$isBot", user.IsBot ? 1 : 0);
-        AddParameter(
-            command,
+        SetParameter(
+            insertAuthorCommand,
+            "$color",
+            Context.TryGetUserColor(user.Id)?.ToHexString()
+        );
+        SetParameter(insertAuthorCommand, "$isBot", user.IsBot ? 1 : 0);
+        SetParameter(
+            insertAuthorCommand,
             "$avatarUrl",
             await Context.ResolveAssetUrlAsync(
                 Context.TryGetMember(user.Id)?.AvatarUrl ?? user.AvatarUrl,
                 cancellationToken
             )
         );
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await insertAuthorCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public override async ValueTask WritePostambleAsync(
@@ -317,6 +386,17 @@ internal class SqliteMessageWriter : MessageWriter
 
     public override async ValueTask DisposeAsync()
     {
+        if (_insertMessageCommand is not null)
+            await _insertMessageCommand.DisposeAsync();
+        if (_insertMessageFtsCommand is not null)
+            await _insertMessageFtsCommand.DisposeAsync();
+        if (_insertAttachmentCommand is not null)
+            await _insertAttachmentCommand.DisposeAsync();
+        if (_insertReactionCommand is not null)
+            await _insertReactionCommand.DisposeAsync();
+        if (_insertAuthorCommand is not null)
+            await _insertAuthorCommand.DisposeAsync();
+
         // Disposing the transaction without a successful Commit rolls it back (e.g. the postamble
         // threw at/before Commit). Note the exporter still runs the postamble on the mid-export
         // error path, so a failed export commits whatever was written — consistent with the other
