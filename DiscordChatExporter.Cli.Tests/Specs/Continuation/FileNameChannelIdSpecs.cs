@@ -26,6 +26,8 @@ public class FileNameChannelIdSpecs
     [InlineData(@"C:\x\my-renamed-export.csv")]
     [InlineData("chat.html")]
     [InlineData("notes [abc].txt")]
+    [InlineData("Guild - general [999999999999999999999999999999].json")]
+    [InlineData("Guild - general [१२३].json")]
     public void I_get_null_when_the_filename_has_no_channel_id(string path)
     {
         FileNameChannelId.TryParse(path).Should().BeNull();
