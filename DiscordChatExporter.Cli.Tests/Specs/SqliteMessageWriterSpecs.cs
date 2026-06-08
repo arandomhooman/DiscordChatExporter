@@ -210,6 +210,35 @@ public class SqliteMessageWriterSpecs : IDisposable
     }
 
     [Fact]
+    public async Task It_indexes_attachment_and_reaction_message_ids()
+    {
+        // Act
+        await using (var writer = new SqliteMessageWriter(DbPath, CreateContext(DbPath)))
+        {
+            await writer.WritePreambleAsync();
+            await writer.WritePostambleAsync();
+        }
+
+        // Assert
+        using var connection = OpenReadOnly(DbPath);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name IN ('attachments_message_id_idx', 'reactions_message_id_idx')
+            ORDER BY name;
+            """;
+
+        var indexes = new List<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            indexes.Add(reader.GetString(0));
+
+        indexes.Should().Equal("attachments_message_id_idx", "reactions_message_id_idx");
+    }
+
+    [Fact]
     public async Task It_indexes_message_content_for_full_text_search()
     {
         // Arrange

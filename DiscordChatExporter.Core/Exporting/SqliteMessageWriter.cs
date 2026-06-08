@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
 using Microsoft.Data.Sqlite;
 using PowerKit.Extensions;
@@ -68,14 +69,19 @@ internal class SqliteMessageWriter : MessageWriter
         );
 
         CREATE VIRTUAL TABLE messages_fts USING fts5(content, message_id UNINDEXED);
+
+        CREATE INDEX attachments_message_id_idx ON attachments(message_id);
+        CREATE INDEX reactions_message_id_idx ON reactions(message_id);
         """;
+
+    private static readonly string[] DatabaseFileSuffixes = ["", "-wal", "-shm", "-journal"];
 
     private readonly string _databaseFilePath;
 
     // The same author recurs across most messages; remember the ids we've already inserted so we
     // don't issue an INSERT OR IGNORE round-trip per message (M inserts) when A distinct authors
     // would do (A << M).
-    private readonly HashSet<string> _seenAuthorIds = new(StringComparer.Ordinal);
+    private readonly HashSet<Snowflake> _seenAuthorIds = [];
     private SqliteConnection? _connection;
     private SqliteTransaction? _transaction;
     private SqliteCommand? _insertMessageCommand;
@@ -258,13 +264,16 @@ internal class SqliteMessageWriter : MessageWriter
         var content = message.IsSystemNotification
             ? message.GetFallbackContent()
             : await FormatMarkdownAsync(message.Content, cancellationToken);
+        var messageId = message.Id.ToString();
+        var authorId = message.Author.Id.ToString();
+        var referenceMessageId = message.Reference?.MessageId?.ToString();
 
         await WriteAuthorAsync(message.Author, cancellationToken);
 
         var insertMessageCommand = _insertMessageCommand!;
         // OR IGNORE: a repeated message id (e.g. a pagination-boundary duplicate) is skipped
         // rather than aborting the whole channel, matching how the other writers tolerate it.
-        SetParameter(insertMessageCommand, "$id", message.Id.ToString());
+        SetParameter(insertMessageCommand, "$id", messageId);
         SetParameter(insertMessageCommand, "$type", message.Kind.ToString());
         SetParameter(
             insertMessageCommand,
@@ -283,12 +292,8 @@ internal class SqliteMessageWriter : MessageWriter
         );
         SetParameter(insertMessageCommand, "$isPinned", message.IsPinned ? 1 : 0);
         SetParameter(insertMessageCommand, "$content", content);
-        SetParameter(insertMessageCommand, "$authorId", message.Author.Id.ToString());
-        SetParameter(
-            insertMessageCommand,
-            "$referenceMessageId",
-            message.Reference?.MessageId?.ToString()
-        );
+        SetParameter(insertMessageCommand, "$authorId", authorId);
+        SetParameter(insertMessageCommand, "$referenceMessageId", referenceMessageId);
         var messageRows = await insertMessageCommand.ExecuteNonQueryAsync(cancellationToken);
 
         // The message id already existed and was ignored above; skip its dependent rows so the
@@ -298,13 +303,13 @@ internal class SqliteMessageWriter : MessageWriter
 
         var insertMessageFtsCommand = _insertMessageFtsCommand!;
         SetParameter(insertMessageFtsCommand, "$content", content);
-        SetParameter(insertMessageFtsCommand, "$messageId", message.Id.ToString());
+        SetParameter(insertMessageFtsCommand, "$messageId", messageId);
         await insertMessageFtsCommand.ExecuteNonQueryAsync(cancellationToken);
 
         foreach (var attachment in message.Attachments)
         {
             var insertAttachmentCommand = _insertAttachmentCommand!;
-            SetParameter(insertAttachmentCommand, "$messageId", message.Id.ToString());
+            SetParameter(insertAttachmentCommand, "$messageId", messageId);
             SetParameter(insertAttachmentCommand, "$id", attachment.Id.ToString());
             SetParameter(
                 insertAttachmentCommand,
@@ -321,7 +326,7 @@ internal class SqliteMessageWriter : MessageWriter
         foreach (var reaction in message.Reactions)
         {
             var insertReactionCommand = _insertReactionCommand!;
-            SetParameter(insertReactionCommand, "$messageId", message.Id.ToString());
+            SetParameter(insertReactionCommand, "$messageId", messageId);
             SetParameter(insertReactionCommand, "$emojiId", reaction.Emoji.Id?.ToString());
             SetParameter(insertReactionCommand, "$emojiName", reaction.Emoji.Name);
             SetParameter(insertReactionCommand, "$emojiCode", reaction.Emoji.Code);
@@ -334,19 +339,18 @@ internal class SqliteMessageWriter : MessageWriter
     private async ValueTask WriteAuthorAsync(User user, CancellationToken cancellationToken)
     {
         // Already inserted this author in this export; the row (deduped by id) is unchanged.
-        if (!_seenAuthorIds.Add(user.Id.ToString()))
+        if (!_seenAuthorIds.Add(user.Id))
             return;
+
+        var userId = user.Id.ToString();
+        var member = Context.TryGetMember(user.Id);
 
         var insertAuthorCommand = _insertAuthorCommand!;
         // OR IGNORE dedupes by the author id primary key.
-        SetParameter(insertAuthorCommand, "$id", user.Id.ToString());
+        SetParameter(insertAuthorCommand, "$id", userId);
         SetParameter(insertAuthorCommand, "$name", user.Name);
         SetParameter(insertAuthorCommand, "$discriminator", user.DiscriminatorFormatted);
-        SetParameter(
-            insertAuthorCommand,
-            "$nickname",
-            Context.TryGetMember(user.Id)?.DisplayName ?? user.DisplayName
-        );
+        SetParameter(insertAuthorCommand, "$nickname", member?.DisplayName ?? user.DisplayName);
         SetParameter(
             insertAuthorCommand,
             "$color",
@@ -357,7 +361,7 @@ internal class SqliteMessageWriter : MessageWriter
             insertAuthorCommand,
             "$avatarUrl",
             await Context.ResolveAssetUrlAsync(
-                Context.TryGetMember(user.Id)?.AvatarUrl ?? user.AvatarUrl,
+                member?.AvatarUrl ?? user.AvatarUrl,
                 cancellationToken
             )
         );
@@ -413,7 +417,7 @@ internal class SqliteMessageWriter : MessageWriter
 
     private static void DeleteDatabaseFiles(string databaseFilePath)
     {
-        foreach (var suffix in new[] { "", "-wal", "-shm", "-journal" })
+        foreach (var suffix in DatabaseFileSuffixes)
         {
             var path = databaseFilePath + suffix;
             try
