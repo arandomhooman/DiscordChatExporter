@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -177,7 +178,9 @@ internal class PlainTextMessageWriter(Stream stream, ExportContext context)
 
             if (reaction.Count > 1)
             {
-                await _writer.WriteAsync($" ({reaction.Count})");
+                await _writer.WriteAsync(
+                    $" ({reaction.Count.ToString("N0", Context.Request.CultureInfo ?? CultureInfo.InvariantCulture)})"
+                );
             }
         }
 
@@ -284,7 +287,9 @@ internal class PlainTextMessageWriter(Stream stream, ExportContext context)
     )
     {
         await _writer.WriteLineAsync(new string('=', 62));
-        await _writer.WriteLineAsync($"Exported {MessagesWritten:N0} message(s)");
+        await _writer.WriteLineAsync(
+            $"Exported {MessagesWritten.ToString("N0", Context.Request.CultureInfo ?? CultureInfo.InvariantCulture)} message(s)"
+        );
         await _writer.WriteLineAsync(new string('=', 62));
     }
 

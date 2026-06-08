@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -61,7 +62,9 @@ public static partial class HtmlExportMerger
                 "Could not locate the message count in the HTML export's postamble."
             );
         var countReplacement =
-            countMatch.Groups[1].Value + totalCount.ToString("n0") + countMatch.Groups[3].Value;
+            countMatch.Groups[1].Value
+            + totalCount.ToString("n0", CultureInfo.InvariantCulture)
+            + countMatch.Groups[3].Value;
 
         ValidateParts(oldHtml, newSlice, oldIdStrings, newIdStrings, totalCount);
 

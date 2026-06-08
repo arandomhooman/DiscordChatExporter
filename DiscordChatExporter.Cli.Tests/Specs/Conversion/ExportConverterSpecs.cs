@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -125,6 +126,65 @@ public sealed class ExportConverterSpecs : IDisposable
         return path;
     }
 
+    private async Task<string> WriteRawJsonWithMessageAsync(
+        string fileName,
+        string timestamp,
+        string reactions = "[]"
+    ) =>
+        await WriteRawJsonAsync(
+            fileName,
+            $$"""
+            {
+              "guild": {
+                "id": "1",
+                "name": "Test Guild",
+                "iconUrl": ""
+              },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": null
+              },
+              "dateRange": {
+                "after": null,
+                "before": null
+              },
+              "exportedAt": "1970-01-01T00:00:00.0000000+00:00",
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "{{timestamp}}",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "hello",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [],
+                  "stickers": [],
+                  "reactions": {{reactions}},
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1
+            }
+            """
+        );
+
     private async Task<string> WriteLegacyMentionJsonAsync()
     {
         var path = Path.Combine(_dir, "legacy-mention.json");
@@ -214,6 +274,60 @@ public sealed class ExportConverterSpecs : IDisposable
             .Should()
             .ContainSingle();
         (await File.ReadAllTextAsync(csvOut)).Should().Contain("quick brown fox");
+    }
+
+    [Fact]
+    public async Task Converter_preserves_source_timestamp_offset_in_csv()
+    {
+        var jsonPath = await WriteRawJsonWithMessageAsync(
+            "offset.json",
+            "2026-06-08T12:30:00.0000000-05:00"
+        );
+        var csvOut = Path.Combine(_dir, "offset.csv");
+
+        await ExportConverter.ConvertAsync(jsonPath, csvOut, ExportFormat.Csv);
+
+        (await File.ReadAllTextAsync(csvOut))
+            .Should()
+            .Contain("\"2026-06-08T12:30:00.0000000-05:00\"");
+    }
+
+    [Fact]
+    public async Task Converter_reaction_counts_do_not_use_ambient_culture()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+        try
+        {
+            var jsonPath = await WriteRawJsonWithMessageAsync(
+                "reaction-count.json",
+                "2026-06-08T12:30:00.0000000+00:00",
+                """
+                [
+                  {
+                    "emoji": {
+                      "id": null,
+                      "name": "wave",
+                      "isAnimated": false
+                    },
+                    "count": 1234
+                  }
+                ]
+                """
+            );
+            var csvOut = Path.Combine(_dir, "reaction-count.csv");
+            var txtOut = Path.Combine(_dir, "reaction-count.txt");
+
+            await ExportConverter.ConvertAsync(jsonPath, csvOut, ExportFormat.Csv);
+            await ExportConverter.ConvertAsync(jsonPath, txtOut, ExportFormat.PlainText);
+
+            (await File.ReadAllTextAsync(csvOut)).Should().Contain("wave (1,234)");
+            (await File.ReadAllTextAsync(txtOut)).Should().Contain("wave (1,234)");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+        }
     }
 
     [Fact]

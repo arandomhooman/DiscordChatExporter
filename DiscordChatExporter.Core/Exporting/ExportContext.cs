@@ -46,7 +46,9 @@ internal class ExportContext(DiscordClient discord, ExportRequest request, bool 
     internal IEnumerable<KeyValuePair<Snowflake, Role>> CachedRoles => _rolesById;
 
     public DateTimeOffset NormalizeDate(DateTimeOffset instant) =>
-        Request.IsUtcNormalizationEnabled ? instant.ToUniversalTime() : instant.ToLocalTime();
+        Request.IsUtcNormalizationEnabled ? instant.ToUniversalTime()
+        : IsOffline ? instant
+        : instant.ToLocalTime();
 
     public string FormatDate(DateTimeOffset instant, string format = "g") =>
         NormalizeDate(instant).ToString(format, Request.CultureInfo);

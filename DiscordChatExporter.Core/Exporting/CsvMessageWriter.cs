@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -56,7 +57,12 @@ internal partial class CsvMessageWriter(Stream stream, ExportContext context)
                 .Append(reaction.Emoji.Name)
                 .Append(' ')
                 .Append('(')
-                .Append(reaction.Count)
+                .Append(
+                    reaction.Count.ToString(
+                        "N0",
+                        Context.Request.CultureInfo ?? CultureInfo.InvariantCulture
+                    )
+                )
                 .Append(')');
         }
 

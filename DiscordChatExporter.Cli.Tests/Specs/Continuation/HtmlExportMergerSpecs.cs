@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -61,6 +62,40 @@ public class HtmlExportMergerSpecs
         }
         finally
         {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
+    public async Task Count_rewrite_does_not_use_ambient_culture()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+        var existing = await WriteAsync(
+            HtmlSample.Export([.. Enumerable.Range(1, 1000).Select(i => (long)i)])
+        );
+        var fresh = await WriteAsync(HtmlSample.Export([1001L]), "-new");
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(1000),
+            null,
+            true,
+            1000,
+            true
+        );
+        try
+        {
+            await HtmlExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            var merged = await File.ReadAllTextAsync(existing);
+            merged.Should().Contain("Exported 1,001 message(s)");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
             File.Delete(existing);
             File.Delete(fresh);
             if (File.Exists(existing + ".bak"))

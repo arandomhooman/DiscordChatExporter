@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -73,8 +74,8 @@ public static class ExportConverter
             shouldFormatMarkdown: true,
             shouldDownloadAssets: false,
             shouldReuseAssets: false,
-            locale: "en-US",
-            isUtcNormalizationEnabled: true
+            locale: CultureInfo.InvariantCulture.Name,
+            isUtcNormalizationEnabled: false
         );
 
         var context = new ExportContext(new DiscordClient("conversion-offline"), request, true);
