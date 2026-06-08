@@ -425,4 +425,9 @@ public sealed record ConversionResultRow(
     bool HasConversionData,
     bool IsSuccess,
     string Message
-);
+)
+{
+    public string FormatName => Format.GetDisplayName();
+
+    public string FidelityText => HasConversionData ? "Full fidelity" : "Best effort";
+}

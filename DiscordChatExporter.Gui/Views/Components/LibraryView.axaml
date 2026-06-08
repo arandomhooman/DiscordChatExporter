@@ -3,6 +3,7 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:components="clr-namespace:DiscordChatExporter.Gui.ViewModels.Components"
+    xmlns:converters="clr-namespace:DiscordChatExporter.Gui.Converters"
     xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
     xmlns:materialStyles="clr-namespace:Material.Styles.Controls;assembly=Material.Styles"
     x:Name="UserControl"
@@ -142,11 +143,11 @@
                                         FontSize="12"
                                         FontWeight="Light"
                                         Opacity="0.8">
-                                        <Run Text="{Binding Format, Mode=OneWay}" />
+                                        <Run Text="{Binding Format, Converter={x:Static converters:ExportFormatToStringConverter.Instance}, Mode=OneWay}" />
                                         <Run Text="·" />
                                         <Run Text="{Binding MessageCount, Mode=OneWay}" />
                                         <Run Text="·" />
-                                        <Run Text="{Binding ExportedAt, Mode=OneWay}" />
+                                        <Run Text="{Binding ExportedAt, Converter={x:Static converters:TimestampToStringConverter.Instance}, Mode=OneWay}" />
                                     </TextBlock>
                                     <TextBlock
                                         FontSize="11"
@@ -203,7 +204,7 @@
                                         <Run Text="·" />
                                         <Run Text="{Binding Hit.AuthorName, Mode=OneWay}" />
                                         <Run Text="·" />
-                                        <Run Text="{Binding Hit.Timestamp, Mode=OneWay}" />
+                                        <Run Text="{Binding Hit.Timestamp, Converter={x:Static converters:TimestampToStringConverter.Instance}, Mode=OneWay}" />
                                     </TextBlock>
                                     <TextBlock
                                         FontSize="13"

@@ -81,15 +81,12 @@
                             <materialStyles:Card Margin="4">
                                 <StackPanel Spacing="2">
                                     <TextBlock FontWeight="SemiBold">
-                                        <Run Text="{Binding Format}" />
+                                        <Run Text="{Binding FormatName}" />
                                         <Run Text=" · " />
                                         <Run Text="{Binding Message}" />
                                     </TextBlock>
                                     <TextBlock FontSize="12" Text="{Binding OutputFilePath}" TextWrapping="Wrap" />
-                                    <TextBlock FontSize="12">
-                                        <Run Text="Full fidelity: " />
-                                        <Run Text="{Binding HasConversionData}" />
-                                    </TextBlock>
+                                    <TextBlock FontSize="12" Text="{Binding FidelityText}" />
                                 </StackPanel>
                             </materialStyles:Card>
                         </DataTemplate>
