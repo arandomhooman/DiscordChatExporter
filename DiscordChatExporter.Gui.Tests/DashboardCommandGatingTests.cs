@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Reflection;
 using Avalonia.Headless.XUnit;
 using DiscordChatExporter.Core.Discord;
@@ -50,6 +51,24 @@ public sealed class DashboardCommandGatingTests
         vm.SelectedGuild = new Guild(new Snowflake(1), "Test Guild", "");
     }
 
+    private static Channel CreateChannel(
+        ulong id,
+        ChannelKind kind = ChannelKind.GuildTextChat,
+        Channel? parent = null
+    ) =>
+        new(
+            new Snowflake(id),
+            kind,
+            new Snowflake(1),
+            parent,
+            $"channel-{id}",
+            0,
+            null,
+            null,
+            false,
+            null
+        );
+
     [AvaloniaFact]
     public void Continue_export_is_gated_like_export_when_no_channel_is_selected()
     {
@@ -80,5 +99,32 @@ public sealed class DashboardCommandGatingTests
         token.IsCancellationRequested.Should().BeTrue();
         vm.CancelOperationCommand.CanExecute(null).Should().BeFalse();
         vm.EndCancelableOperation();
+    }
+
+    [AvaloniaFact]
+    public void Select_all_toggles_only_exportable_channels()
+    {
+        var vm = CreateViewModel();
+        var category = CreateChannel(10, ChannelKind.GuildCategory);
+        var categoryChild = CreateChannel(11, parent: category);
+        var parentChannel = CreateChannel(12);
+        var thread = CreateChannel(13, ChannelKind.GuildPublicThread, parentChannel);
+        vm.AvailableChannels =
+        [
+            new ChannelConnection(category, [new ChannelConnection(categoryChild, [])]),
+            new ChannelConnection(parentChannel, [new ChannelConnection(thread, [])]),
+        ];
+
+        vm.SelectAllChannelsCommand.CanExecute(null).Should().BeTrue();
+        vm.SelectAllChannelsCommand.Execute(null);
+
+        vm.SelectedChannels.Select(c => c.Channel.Id.Value).Should().Equal(11, 12, 13);
+        vm.AllChannelsSelected.Should().BeTrue();
+        vm.SelectAllChannelsButtonText.Should().Contain("Deselect");
+
+        vm.SelectAllChannelsCommand.Execute(null);
+
+        vm.SelectedChannels.Should().BeEmpty();
+        vm.AllChannelsSelected.Should().BeFalse();
     }
 }

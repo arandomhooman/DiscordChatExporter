@@ -63,6 +63,7 @@ public partial class DashboardViewModel : ViewModelBase
     private int _activeRateLimitPauseCount;
 
     private DiscordClient? _discord;
+    private IReadOnlyList<ChannelConnection> _exportableChannels = [];
 
     private ExportSetupViewModel? _lastExportSetup;
     private IReadOnlyList<Channel> _lastFailedChannels = [];
@@ -221,15 +222,17 @@ public partial class DashboardViewModel : ViewModelBase
 
     public ObservableCollection<ChannelConnection> SelectedChannels { get; } = [];
 
+    partial void OnAvailableChannelsChanged(IReadOnlyList<ChannelConnection>? value)
+    {
+        _exportableChannels = value is not null ? FlattenExportableChannels(value).ToArray() : [];
+    }
+
     // True when every exportable (non-category) channel in the current guild is selected.
     public bool AllChannelsSelected
     {
         get
         {
-            if (AvailableChannels is null)
-                return false;
-
-            var exportableCount = FlattenExportableChannels(AvailableChannels).Count();
+            var exportableCount = _exportableChannels.Count;
             return exportableCount > 0 && SelectedChannels.Count >= exportableCount;
         }
     }
@@ -443,15 +446,12 @@ public partial class DashboardViewModel : ViewModelBase
         }
     }
 
-    private bool CanSelectAllChannels() =>
-        !IsBusy
-        && AvailableChannels is not null
-        && FlattenExportableChannels(AvailableChannels).Any();
+    private bool CanSelectAllChannels() => !IsBusy && _exportableChannels.Count > 0;
 
     [RelayCommand(CanExecute = nameof(CanSelectAllChannels))]
     private void SelectAllChannels()
     {
-        if (AvailableChannels is null)
+        if (_exportableChannels.Count <= 0)
             return;
 
         // Capture the toggle state before mutating, since AllChannelsSelected
@@ -461,7 +461,7 @@ public partial class DashboardViewModel : ViewModelBase
 
         if (!wasAllSelected)
         {
-            foreach (var connection in FlattenExportableChannels(AvailableChannels))
+            foreach (var connection in _exportableChannels)
                 SelectedChannels.Add(connection);
         }
     }
