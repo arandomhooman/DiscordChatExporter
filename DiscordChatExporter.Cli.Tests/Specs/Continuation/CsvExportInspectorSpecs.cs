@@ -16,14 +16,16 @@ public class CsvExportInspectorSpecs
         return path;
     }
 
-    private const string Header = "AuthorID,Author,Date,Content,Attachments,Reactions\r\n";
+    private const string LegacyHeader = "AuthorID,Author,Date,Content,Attachments,Reactions\r\n";
+    private const string Header =
+        "MessageID,AuthorID,Author,Date,Content,Attachments,Reactions\r\n";
 
     [Fact]
     public async Task I_can_read_the_cutoff_count_and_order_from_a_csv_export()
     {
         var body =
-            "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"hi\",\"\",\"\"\r\n"
-            + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"bye, really\",\"\",\"\"\r\n";
+            "\"1001\",\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"hi\",\"\",\"\"\r\n"
+            + "\"1002\",\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"bye, really\",\"\",\"\"\r\n";
         var path = await WriteAsync(Header + body, "Guild - general");
         try
         {
@@ -31,13 +33,8 @@ public class CsvExportInspectorSpecs
             info.ChannelId.Value.Should().Be(222UL);
             info.ExistingCount.Should().Be(2);
             info.IsChronological.Should().BeTrue();
-            info.CutoffIsExact.Should().BeFalse();
-            info.Cutoff.ToDate()
-                .Should()
-                .BeCloseTo(
-                    new DateTimeOffset(2021, 07, 24, 13, 49, 13, TimeSpan.Zero),
-                    TimeSpan.FromSeconds(1)
-                );
+            info.CutoffIsExact.Should().BeTrue();
+            info.Cutoff.Value.Should().Be(1002UL);
         }
         finally
         {
@@ -51,11 +48,12 @@ public class CsvExportInspectorSpecs
         var body =
             "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"line1\nline2, with \"\"quote\"\"\",\"\",\"\"\r\n"
             + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"ok\",\"\",\"\"\r\n";
-        var path = await WriteAsync(Header + body, "Guild - general");
+        var path = await WriteAsync(LegacyHeader + body, "Guild - general");
         try
         {
             var info = await CsvExportInspector.InspectAsync(path);
             info.ExistingCount.Should().Be(2); // embedded newline did NOT create a phantom row
+            info.CutoffIsExact.Should().BeFalse();
         }
         finally
         {
@@ -66,7 +64,7 @@ public class CsvExportInspectorSpecs
     [Fact]
     public async Task I_cannot_continue_a_csv_with_no_data_rows()
     {
-        var path = await WriteAsync(Header, "Guild - general");
+        var path = await WriteAsync(LegacyHeader, "Guild - general");
         try
         {
             var act = async () => await CsvExportInspector.InspectAsync(path);
@@ -84,7 +82,7 @@ public class CsvExportInspectorSpecs
         var path = Path.Combine(Path.GetTempPath(), $"renamed-{Guid.NewGuid():N}.csv");
         await File.WriteAllTextAsync(
             path,
-            Header + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"x\",\"\",\"\"\r\n"
+            LegacyHeader + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"x\",\"\",\"\"\r\n"
         );
         try
         {
@@ -104,7 +102,7 @@ public class CsvExportInspectorSpecs
             "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"first\",\"\",\"\"\r\n"
             + "\"5\",\"A\",\"2021-07-24T13:49:13.0000000+00:00\",\"second\",\"\",\"\"\r\n"
             + "\"5\",\"A\",\"2021-07-20T13:49:13.0000000+00:00\",\"third\",\"\",\"\"\r\n";
-        var path = await WriteAsync(Header + body, "Guild - general");
+        var path = await WriteAsync(LegacyHeader + body, "Guild - general");
         try
         {
             var act = async () => await CsvExportInspector.InspectAsync(path);
@@ -120,7 +118,10 @@ public class CsvExportInspectorSpecs
     public async Task I_cannot_continue_a_before_bounded_csv_export_without_exact_bound_metadata()
     {
         var body = "\"5\",\"A\",\"2021-07-19T13:34:18.0000000+00:00\",\"first\",\"\",\"\"\r\n";
-        var path = await WriteAsync(Header + body, "Guild - general (2021-07-01 to 2021-07-31)");
+        var path = await WriteAsync(
+            LegacyHeader + body,
+            "Guild - general (2021-07-01 to 2021-07-31)"
+        );
         try
         {
             var act = async () => await CsvExportInspector.InspectAsync(path);

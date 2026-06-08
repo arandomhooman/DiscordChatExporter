@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
 using DiscordChatExporter.Cli.Tests.Infra;
@@ -9,6 +11,29 @@ namespace DiscordChatExporter.Cli.Tests.Specs;
 
 public class CsvContentSpecs
 {
+    [Fact]
+    public async Task CSV_export_includes_message_id_column()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"dce-csv-header-{Guid.NewGuid():N}.csv");
+
+        try
+        {
+            await using (var writer = new CsvMessageWriter(File.Create(path), null!))
+            {
+                await writer.WritePreambleAsync();
+            }
+
+            var header = await File.ReadAllTextAsync(path);
+
+            header.Should().StartWith("MessageID,AuthorID,Author,Date,Content");
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
     [Theory]
     [InlineData("=1+1", "\"'=1+1\"")]
     [InlineData("+1+1", "\"'+1+1\"")]

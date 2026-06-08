@@ -30,6 +30,9 @@ public static class CsvExportMerger
         }
 
         var newRows = CsvExportInspector.ParseCsv(newText);
+        var header = newRows.Count > 0 ? newRows[0] : [];
+        var messageIdColumnIndex = CsvExportInspector.GetColumnIndex(header, "MessageID", -1);
+        var dateColumnIndex = CsvExportInspector.GetColumnIndex(header, "Date", 2);
 
         var tempPath = existingFilePath + ".merging.tmp";
         long added = 0;
@@ -42,11 +45,28 @@ public static class CsvExportMerger
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var fields = newRows[i];
-                    if (fields.Count < 3)
+                    if (fields.Count <= dateColumnIndex)
                         continue;
+
+                    if (
+                        cutoff.CutoffIsExact
+                        && messageIdColumnIndex >= 0
+                        && fields.Count > messageIdColumnIndex
+                        && CsvExportInspector.TryParseMessageId(fields[messageIdColumnIndex])
+                            is { } messageId
+                    )
+                    {
+                        if (messageId.Value <= cutoff.Cutoff.Value)
+                            continue;
+
+                        await writer.WriteAsync(EncodeRow(fields));
+                        added++;
+                        continue;
+                    }
+
                     if (
                         DateTimeOffset.TryParse(
-                            fields[2],
+                            fields[dateColumnIndex],
                             CultureInfo.InvariantCulture,
                             DateTimeStyles.RoundtripKind,
                             out var date

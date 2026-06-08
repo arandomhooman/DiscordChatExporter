@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,18 +48,24 @@ public static class CsvExportInspector
                 "The CSV export contains no messages to continue from."
             );
 
+        var header = rows[0];
+        var messageIdColumnIndex = GetColumnIndex(header, "MessageID", -1);
+        var dateColumnIndex = GetColumnIndex(header, "Date", 2);
+
         DateTimeOffset? firstDate = null;
         DateTimeOffset? lastDate = null;
+        Snowflake? lastMessageId = null;
+        var hasExactMessageId = messageIdColumnIndex >= 0;
         var orderDirection = 0;
         long count = 0;
         for (var i = 1; i < rows.Count; i++)
         {
             var fields = rows[i];
-            if (fields.Count < 3)
+            if (fields.Count <= dateColumnIndex)
                 continue;
             if (
                 DateTimeOffset.TryParse(
-                    fields[2],
+                    fields[dateColumnIndex],
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.RoundtripKind,
                     out var date
@@ -69,6 +76,20 @@ public static class CsvExportInspector
                 firstDate ??= date;
                 lastDate = date;
             }
+
+            if (messageIdColumnIndex >= 0)
+            {
+                var messageId =
+                    fields.Count > messageIdColumnIndex
+                        ? TryParseMessageId(fields[messageIdColumnIndex])
+                        : null;
+
+                if (messageId is { } id)
+                    lastMessageId = id;
+                else
+                    hasExactMessageId = false;
+            }
+
             count++;
         }
 
@@ -76,15 +97,49 @@ public static class CsvExportInspector
             throw new InvalidExportException("The CSV export has no parseable message dates.");
 
         var isChronological = firstDate <= lastDate;
+        var hasExactCutoff = hasExactMessageId && lastMessageId is not null;
+        var cutoff =
+            lastMessageId is { } exactMessageId && hasExactMessageId
+                ? exactMessageId
+                : Snowflake.FromDate(lastDate.Value);
         return new ContinuationCutoff(
             channelId,
-            Snowflake.FromDate(lastDate.Value),
+            cutoff,
             null,
             isChronological,
             count,
-            CutoffIsExact: false
+            CutoffIsExact: hasExactCutoff
         );
     }
+
+    internal static int GetColumnIndex(
+        IReadOnlyList<string> header,
+        string columnName,
+        int fallbackIndex
+    )
+    {
+        var index = header
+            .Select((name, index) => (name, index))
+            .FirstOrDefault(pair =>
+                string.Equals(pair.name, columnName, StringComparison.OrdinalIgnoreCase)
+            )
+            .index;
+
+        return
+            index > 0
+            || string.Equals(
+                header.FirstOrDefault(),
+                columnName,
+                StringComparison.OrdinalIgnoreCase
+            )
+            ? index
+            : fallbackIndex;
+    }
+
+    internal static Snowflake? TryParseMessageId(string? value) =>
+        ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+            ? new Snowflake(id)
+            : null;
 
     internal static List<List<string>> ParseCsv(string text)
     {

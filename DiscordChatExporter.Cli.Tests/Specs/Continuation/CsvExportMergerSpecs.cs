@@ -12,9 +12,14 @@ namespace DiscordChatExporter.Cli.Tests.Specs.Continuation;
 public class CsvExportMergerSpecs
 {
     private const string Header = "AuthorID,Author,Date,Content,Attachments,Reactions\r\n";
+    private const string HeaderWithMessageId =
+        "MessageID,AuthorID,Author,Date,Content,Attachments,Reactions\r\n";
 
     private static string Row(string date, string content) =>
         $"\"5\",\"A\",\"{date}\",\"{content}\",\"\",\"\"\r\n";
+
+    private static string Row(ulong id, string date, string content) =>
+        $"\"{id}\",\"5\",\"A\",\"{date}\",\"{content}\",\"\",\"\"\r\n";
 
     private static async Task<string> WriteAsync(string content)
     {
@@ -91,6 +96,45 @@ public class CsvExportMergerSpecs
             lines.Last().Should().Contain("2021-07-25");
             // The atomic-replace .bak is a transient crash-safety net, cleaned up on success.
             File.Exists(existing + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+            if (File.Exists(existing + ".bak"))
+                File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
+    public async Task It_appends_same_timestamp_rows_with_greater_message_ids()
+    {
+        var d1 = "2021-07-24T13:49:13.0000000+00:00";
+        var existing = await WriteAsync(HeaderWithMessageId + Row(1002, d1, "existing"));
+        var fresh = await WriteAsync(
+            HeaderWithMessageId
+                + Row(1002, d1, "duplicate")
+                + Row(1003, d1, "same timestamp newer")
+                + Row(1004, "2021-07-25T10:00:00.0000000+00:00", "later")
+        );
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(1002),
+            null,
+            true,
+            1,
+            true
+        );
+
+        try
+        {
+            var added = await CsvExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            added.Should().Be(2);
+            var text = await File.ReadAllTextAsync(existing);
+            text.Should().NotContain("duplicate");
+            text.Should().Contain("same timestamp newer");
+            text.Should().Contain("later");
         }
         finally
         {
