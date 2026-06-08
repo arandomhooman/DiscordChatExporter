@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exceptions;
@@ -81,6 +83,21 @@ public sealed class ContinueExportRunnerTests
             ExportFormat.Json,
             new ContinuationCutoff(channel.Id, new Snowflake(channelId + 10), null, true, 1, true)
         );
+    }
+
+    [AvaloniaFact]
+    public async Task Continuation_work_runs_off_the_ui_thread()
+    {
+        Dispatcher.UIThread.CheckAccess().Should().BeTrue();
+        var ranOnUiThread = true;
+
+        await DashboardViewModel.RunContinuationWorkOffUiThreadAsync(() =>
+        {
+            ranOnUiThread = Dispatcher.UIThread.CheckAccess();
+            return ValueTask.FromResult(42);
+        });
+
+        ranOnUiThread.Should().BeFalse();
     }
 
     [Fact]

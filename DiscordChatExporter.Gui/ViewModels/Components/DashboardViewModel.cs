@@ -170,6 +170,11 @@ public partial class DashboardViewModel : ViewModelBase
 
     public LocalizationManager LocalizationManager { get; }
 
+    internal static Task<T> RunContinuationWorkOffUiThreadAsync<T>(
+        Func<ValueTask<T>> workAsync,
+        CancellationToken cancellationToken = default
+    ) => Task.Run(async () => await workAsync(), cancellationToken);
+
     public ProgressContainer<Percentage> Progress { get; } = new();
 
     public bool IsProgressIndeterminate =>
@@ -1420,7 +1425,9 @@ public partial class DashboardViewModel : ViewModelBase
             ContinuationCutoff cutoff;
             try
             {
-                cutoff = await ContinuationFormat.ReadCutoffAsync(entry.FilePath);
+                cutoff = await RunContinuationWorkOffUiThreadAsync(() =>
+                    ContinuationFormat.ReadCutoffAsync(entry.FilePath)
+                );
             }
             catch (DiscordChatExporterException ex) when (!ex.IsFatal)
             {
@@ -1492,7 +1499,9 @@ public partial class DashboardViewModel : ViewModelBase
         ContinuationCutoff cutoff;
         try
         {
-            cutoff = await ContinuationFormat.ReadCutoffAsync(filePath);
+            cutoff = await RunContinuationWorkOffUiThreadAsync(() =>
+                ContinuationFormat.ReadCutoffAsync(filePath)
+            );
         }
         catch (DiscordChatExporterException ex) when (!ex.IsFatal)
         {
@@ -1566,11 +1575,15 @@ public partial class DashboardViewModel : ViewModelBase
             }
 
             var countBefore = target.Cutoff.ExistingCount;
-            var total = await ContinuationFormat.MergeAsync(
-                target.FilePath,
-                tempPath,
-                target.Cutoff,
-                DateTimeOffset.Now,
+            var total = await RunContinuationWorkOffUiThreadAsync(
+                () =>
+                    ContinuationFormat.MergeAsync(
+                        target.FilePath,
+                        tempPath,
+                        target.Cutoff,
+                        DateTimeOffset.Now,
+                        cancellationToken
+                    ),
                 cancellationToken
             );
             var newMessages = total - countBefore;
