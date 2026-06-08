@@ -604,4 +604,82 @@ public sealed class ExportConverterSpecs : IDisposable
             .Should()
             .ThrowAsync<InvalidExportException>();
     }
+
+    [Fact]
+    public async Task Converter_wraps_malformed_conversion_data_ids_as_invalid_export()
+    {
+        var jsonPath = await WriteRawJsonAsync(
+            "malformed-conversion-data-id.json",
+            """
+            {
+              "guild": {
+                "id": "1",
+                "name": "Test Guild",
+                "iconUrl": ""
+              },
+              "channel": {
+                "id": "2",
+                "type": "GuildTextChat",
+                "categoryId": null,
+                "category": null,
+                "name": "test-channel",
+                "topic": "topic"
+              },
+              "messages": [
+                {
+                  "id": "1001",
+                  "type": "Default",
+                  "timestamp": "1970-01-01T00:16:41.0000000+00:00",
+                  "timestampEdited": null,
+                  "callEndedTimestamp": null,
+                  "isPinned": false,
+                  "content": "hello",
+                  "author": {
+                    "id": "10",
+                    "name": "alice",
+                    "discriminator": "0000",
+                    "nickname": "alice",
+                    "color": null,
+                    "isBot": false,
+                    "roles": [],
+                    "avatarUrl": ""
+                  },
+                  "attachments": [],
+                  "embeds": [],
+                  "stickers": [],
+                  "reactions": [],
+                  "mentions": [],
+                  "inlineEmojis": []
+                }
+              ],
+              "messageCount": 1,
+              "conversionData": {
+                "schemaVersion": 1,
+                "members": [
+                  {
+                    "id": "10",
+                    "displayName": "alice",
+                    "avatarUrl": null,
+                    "colorHex": null,
+                    "roleIds": ["not-a-snowflake"]
+                  }
+                ],
+                "roles": [],
+                "channels": [],
+                "emojis": []
+              }
+            }
+            """
+        );
+        var htmlOut = Path.Combine(_dir, "malformed-conversion-data-id.html");
+
+        var exception = await FluentActions
+            .Awaiting(() =>
+                ExportConverter.ConvertAsync(jsonPath, htmlOut, ExportFormat.HtmlDark).AsTask()
+            )
+            .Should()
+            .ThrowAsync<InvalidExportException>();
+
+        exception.Which.InnerException.Should().BeOfType<FormatException>();
+    }
 }

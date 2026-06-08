@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,7 +43,19 @@ public static class ExportConverter
 
         var context = new ExportContext(new DiscordClient("conversion-offline"), request, true);
         if (parsed.ConversionData is not null)
-            context.SeedFromConversionData(parsed.ConversionData, referencedUsers);
+        {
+            try
+            {
+                context.SeedFromConversionData(parsed.ConversionData, referencedUsers);
+            }
+            catch (Exception ex) when (ex is FormatException or OverflowException)
+            {
+                throw new InvalidExportException(
+                    $"'{jsonFilePath}' contains malformed conversion metadata.",
+                    ex
+                );
+            }
+        }
 
         var exporter = new MessageExporter(context);
         try
