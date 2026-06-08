@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Exporting;
 using DiscordChatExporter.Core.Exporting.Manifest;
@@ -131,5 +132,32 @@ public class ManifestBuilderSpecs : IDisposable
 
         entries.Should().ContainSingle();
         entries[0].File.Should().Be("present.json");
+    }
+
+    [Fact]
+    public void Build_honors_cancellation_before_hashing_output_files()
+    {
+        var path = WriteFile("general.json", "hello");
+        var result = new ExportResult(
+            [
+                new ExportedFile(
+                    path,
+                    1,
+                    new Snowflake(1),
+                    DateTimeOffset.UnixEpoch,
+                    new Snowflake(2),
+                    DateTimeOffset.UnixEpoch
+                ),
+            ],
+            1,
+            0
+        );
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var act = () =>
+            ManifestBuilder.Build(Info(), result, DateTimeOffset.UnixEpoch, cancellation.Token);
+
+        act.Should().Throw<OperationCanceledException>();
     }
 }

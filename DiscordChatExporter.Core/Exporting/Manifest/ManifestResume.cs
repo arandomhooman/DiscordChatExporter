@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using DiscordChatExporter.Core.Exporting;
 
 namespace DiscordChatExporter.Core.Exporting.Manifest;
@@ -26,9 +27,12 @@ public static class ManifestResume
     public static bool IsAlreadyExported(
         ExportManifest? manifest,
         string dirPath,
-        ExportRequest request
+        ExportRequest request,
+        CancellationToken cancellationToken = default
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (manifest is null)
             return false;
 
@@ -49,9 +53,11 @@ public static class ManifestResume
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             return new FileInfo(filePath).Length == entry.FileSizeBytes
                 && string.Equals(
-                    ManifestBuilder.ComputeSha256(filePath),
+                    ManifestBuilder.ComputeSha256(filePath, cancellationToken),
                     entry.Sha256,
                     StringComparison.OrdinalIgnoreCase
                 );

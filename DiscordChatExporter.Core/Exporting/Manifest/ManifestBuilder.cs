@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Threading;
 
 namespace DiscordChatExporter.Core.Exporting.Manifest;
 
@@ -12,7 +13,8 @@ public static class ManifestBuilder
     public static IReadOnlyList<ManifestEntry> Build(
         ManifestChannelInfo info,
         ExportResult result,
-        DateTimeOffset now
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default
     )
     {
         var partitioned = result.Files.Count > 1;
@@ -20,6 +22,8 @@ public static class ManifestBuilder
 
         foreach (var file in result.Files)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             long sizeBytes;
             string sha256;
 
@@ -28,7 +32,7 @@ public static class ManifestBuilder
             try
             {
                 sizeBytes = new FileInfo(file.FilePath).Length;
-                sha256 = ComputeSha256(file.FilePath);
+                sha256 = ComputeSha256(file.FilePath, cancellationToken);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -63,9 +67,29 @@ public static class ManifestBuilder
         return entries;
     }
 
-    internal static string ComputeSha256(string filePath)
+    internal static string ComputeSha256(
+        string filePath,
+        CancellationToken cancellationToken = default
+    )
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var hash = SHA256.Create();
         using var stream = File.OpenRead(filePath);
-        return Convert.ToHexStringLower(SHA256.HashData(stream));
+        var buffer = new byte[1024 * 128];
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var bytesRead = stream.Read(buffer, 0, buffer.Length);
+            if (bytesRead <= 0)
+                break;
+
+            hash.TransformBlock(buffer, 0, bytesRead, null, 0);
+        }
+
+        hash.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return Convert.ToHexStringLower(hash.Hash!);
     }
 }

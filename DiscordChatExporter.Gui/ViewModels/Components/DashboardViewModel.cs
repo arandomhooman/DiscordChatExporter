@@ -939,7 +939,8 @@ public partial class DashboardViewModel : ViewModelBase
     // notifies once per run rather than once per channel).
     private async ValueTask<bool> CheckpointManifestAsync(
         ExportRequest request,
-        ExportResult result
+        ExportResult result,
+        CancellationToken cancellationToken
     )
     {
         try
@@ -947,9 +948,15 @@ public partial class DashboardViewModel : ViewModelBase
             var entries = ManifestBuilder.Build(
                 BuildManifestInfo(request),
                 result,
-                DateTimeOffset.Now
+                DateTimeOffset.Now,
+                cancellationToken
             );
-            await ManifestWriter.WriteAsync(request.OutputDirPath, entries, DateTimeOffset.Now);
+            await ManifestWriter.WriteAsync(
+                request.OutputDirPath,
+                entries,
+                DateTimeOffset.Now,
+                cancellationToken
+            );
             return true;
         }
         catch (Exception ex)
@@ -982,7 +989,8 @@ public partial class DashboardViewModel : ViewModelBase
         Guild guild,
         Channel channel,
         long messageCount,
-        ExportResult? appendedResult
+        ExportResult? appendedResult,
+        CancellationToken cancellationToken
     )
     {
         try
@@ -993,7 +1001,8 @@ public partial class DashboardViewModel : ViewModelBase
 
             var fileName = Path.GetFileName(filePath);
             var existing = await ManifestReader.TryReadAsync(
-                Path.Combine(dir, ExportManifest.FileName)
+                Path.Combine(dir, ExportManifest.FileName),
+                cancellationToken
             );
             var prior = existing?.Entries.FirstOrDefault(e =>
                 string.Equals(e.File, fileName, StringComparison.OrdinalIgnoreCase)
@@ -1017,7 +1026,12 @@ public partial class DashboardViewModel : ViewModelBase
                 0
             );
 
-            var entries = ManifestBuilder.Build(info, result, DateTimeOffset.Now);
+            var entries = ManifestBuilder.Build(
+                info,
+                result,
+                DateTimeOffset.Now,
+                cancellationToken
+            );
             if (entries.Count == 0)
                 return false;
 
@@ -1046,7 +1060,7 @@ public partial class DashboardViewModel : ViewModelBase
                 ];
             }
 
-            await ManifestWriter.WriteAsync(dir, entries, DateTimeOffset.Now);
+            await ManifestWriter.WriteAsync(dir, entries, DateTimeOffset.Now, cancellationToken);
             return true;
         }
         catch (Exception ex)
@@ -1101,7 +1115,7 @@ public partial class DashboardViewModel : ViewModelBase
                 manifestsByDir[dir] = manifest;
             }
 
-            if (ManifestResume.IsAlreadyExported(manifest, dir, r.Request))
+            if (ManifestResume.IsAlreadyExported(manifest, dir, r.Request, cancellationToken))
             {
                 alreadyDone.Add(r);
             }
@@ -1174,7 +1188,7 @@ public partial class DashboardViewModel : ViewModelBase
                         cancellationToken
                     );
 
-                    if (!await CheckpointManifestAsync(request, result))
+                    if (!await CheckpointManifestAsync(request, result, cancellationToken))
                         Interlocked.Exchange(ref catalogWriteFailed, 1);
 
                     exportStats.Add(
@@ -1212,7 +1226,8 @@ public partial class DashboardViewModel : ViewModelBase
                                 ],
                                 0,
                                 0
-                            )
+                            ),
+                            cancellationToken
                         )
                     )
                         Interlocked.Exchange(ref catalogWriteFailed, 1);
@@ -1665,7 +1680,8 @@ public partial class DashboardViewModel : ViewModelBase
                 target.Guild,
                 target.Channel,
                 total,
-                appendedResult
+                appendedResult,
+                cancellationToken
             );
 
             return new ContinueExportFileResult(true, newMessages, isCatalogRefreshed);

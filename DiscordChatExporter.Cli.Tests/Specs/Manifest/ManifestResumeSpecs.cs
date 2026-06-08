@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Threading;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Discord.Data;
 using DiscordChatExporter.Core.Exporting;
@@ -168,6 +169,34 @@ public class ManifestResumeSpecs
 
             File.WriteAllText(filePath, "HELLO");
             ManifestResume.IsAlreadyExported(manifest, dir, request).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Strict_resume_matching_honors_cancellation_before_hashing()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "DceManifest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var filePath = Path.Combine(dir, "archive.json");
+        File.WriteAllText(filePath, "{}");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        try
+        {
+            var manifest = Manifest(
+                Entry("archive.json", new FileInfo(filePath).Length, ComputeSha256(filePath))
+            );
+            var request = Request(filePath, guildId: 1, channelId: 2);
+
+            var act = () =>
+                ManifestResume.IsAlreadyExported(manifest, dir, request, cancellation.Token);
+
+            act.Should().Throw<OperationCanceledException>();
         }
         finally
         {
