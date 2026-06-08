@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Exporting.Continuation;
 using FluentAssertions;
@@ -79,6 +80,35 @@ public class JsonExportMergerSpecs
                 File.Delete(existing + ".merging.tmp");
             if (File.Exists(existing + ".bak"))
                 File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
+    public async Task Merge_preserves_existing_file_when_cancelled()
+    {
+        var existing = await WriteAsync(Existing($"{MsgA},{MsgB}", 2));
+        var existingBefore = await File.ReadAllTextAsync(existing);
+        var fresh = await WriteAsync(Existing(MsgC, 1));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        try
+        {
+            var act = async () =>
+                await JsonExportMerger.MergeAsync(
+                    existing,
+                    fresh,
+                    DateTimeOffset.UnixEpoch,
+                    cancellation.Token
+                );
+
+            await act.Should().ThrowAsync<OperationCanceledException>();
+            (await File.ReadAllTextAsync(existing)).Should().Be(existingBefore);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
         }
     }
 

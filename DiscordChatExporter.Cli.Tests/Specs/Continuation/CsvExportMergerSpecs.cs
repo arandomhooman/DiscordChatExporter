@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Core.Discord;
 using DiscordChatExporter.Core.Exporting.Continuation;
@@ -66,6 +67,40 @@ public class CsvExportMergerSpecs
                 File.Delete(existing + ".merging.tmp");
             if (File.Exists(existing + ".bak"))
                 File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
+    public async Task Merge_preserves_existing_file_when_cancelled()
+    {
+        var d1 = "2021-07-24T13:49:13.0000000+00:00";
+        var d2 = "2021-07-25T10:00:00.0000000+00:00";
+        var existing = await WriteAsync(Header + Row(d1, "existing"));
+        var existingBefore = await File.ReadAllTextAsync(existing);
+        var fresh = await WriteAsync(Header + Row(d2, "fresh"));
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            Snowflake.FromDate(DateTimeOffset.Parse(d1)),
+            null,
+            true,
+            1,
+            false
+        );
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        try
+        {
+            var act = async () =>
+                await CsvExportMerger.MergeAsync(existing, fresh, cutoff, cancellation.Token);
+
+            await act.Should().ThrowAsync<OperationCanceledException>();
+            (await File.ReadAllTextAsync(existing)).Should().Be(existingBefore);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
         }
     }
 

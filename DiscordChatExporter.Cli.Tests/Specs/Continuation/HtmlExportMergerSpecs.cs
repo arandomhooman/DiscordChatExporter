@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using DiscordChatExporter.Cli.Tests.Infra;
 using DiscordChatExporter.Core.Discord;
@@ -64,6 +65,67 @@ public class HtmlExportMergerSpecs
             File.Delete(fresh);
             if (File.Exists(existing + ".bak"))
                 File.Delete(existing + ".bak");
+        }
+    }
+
+    [Fact]
+    public async Task Merge_preserves_existing_file_when_cancelled()
+    {
+        var existing = await WriteAsync(HtmlSample.Export([1000L]));
+        var existingBefore = await File.ReadAllTextAsync(existing);
+        var fresh = await WriteAsync(HtmlSample.Export([2000L]), "-new");
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(1000),
+            null,
+            true,
+            1,
+            true
+        );
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        try
+        {
+            var act = async () =>
+                await HtmlExportMerger.MergeAsync(existing, fresh, cutoff, cancellation.Token);
+
+            await act.Should().ThrowAsync<OperationCanceledException>();
+            (await File.ReadAllTextAsync(existing)).Should().Be(existingBefore);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
+        }
+    }
+
+    [Fact]
+    public async Task Merge_preserves_existing_file_when_new_html_is_malformed()
+    {
+        var existing = await WriteAsync(HtmlSample.Export([1000L]));
+        var existingBefore = await File.ReadAllTextAsync(existing);
+        var fresh = await WriteAsync("<html><body>not an export</body></html>", "-new");
+        var cutoff = new ContinuationCutoff(
+            new Snowflake(222),
+            new Snowflake(1000),
+            null,
+            true,
+            1,
+            true
+        );
+
+        try
+        {
+            var act = async () => await HtmlExportMerger.MergeAsync(existing, fresh, cutoff);
+
+            await act.Should().ThrowAsync<InvalidExportException>();
+            (await File.ReadAllTextAsync(existing)).Should().Be(existingBefore);
+        }
+        finally
+        {
+            File.Delete(existing);
+            File.Delete(fresh);
         }
     }
 
