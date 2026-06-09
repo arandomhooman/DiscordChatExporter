@@ -79,11 +79,14 @@ jobs:
           --logger "GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true"
 
       - name: Run GUI tests
+        # NOTE: no `--logger GitHubActions`. Gui.Tests runs on Avalonia.Headless.XUnit 12 / xunit.v3
+        # via the Microsoft.Testing.Platform runner, which can't load the VSTest GitHubActionsTestLogger
+        # (it would need Microsoft.Testing.Platform 2.0.0; the project pins 1.9.1 -> CS1705). The CLI
+        # tests above keep the logger because they run under VSTest, where it's supported.
         run: >
           dotnet test DiscordChatExporter.Gui.Tests
           -p:CSharpier_Bypass=true
           --configuration Release
-          --logger "GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true"
 
       - name: Run live-token CLI tests
         if: ${{ github.event_name != 'pull_request' && env.DISCORD_TOKEN != '' }}

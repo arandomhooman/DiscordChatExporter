@@ -162,12 +162,16 @@ public sealed class DashboardProgressTests
                 progressChangedThreadIds.Add(Environment.CurrentManagedThreadId);
         };
 
+        // Complete the run from a background thread, then pump the dispatcher to apply the posted update.
         await Task.Run(() => Invoke(viewModel, "MarkExportProgressCompleted", 0));
-
-        viewModel.DisplayedProgressFraction.Should().Be(0);
-
         Dispatcher.UIThread.RunJobs();
 
+        // The contract this test guards: a background-thread completion is marshaled *to the UI thread*,
+        // never applied on the background thread. The thread the mutation fired on captures that directly
+        // and is timing-independent. We deliberately do NOT assert the fraction is still 0 between the
+        // post and the pump: once the job is posted, any pump of the process-global headless dispatcher
+        // (framework internals, or other tests sharing it in a full-suite run) may run it first, which
+        // made that intermediate assertion flaky.
         viewModel.DisplayedProgressFraction.Should().Be(1);
         progressChangedThreadIds.Should().ContainSingle().Which.Should().Be(uiThreadId);
     }
