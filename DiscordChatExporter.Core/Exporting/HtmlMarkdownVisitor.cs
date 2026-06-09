@@ -164,7 +164,7 @@ internal partial class HtmlMarkdownVisitor(
     )
     {
         var highlightClass = !string.IsNullOrWhiteSpace(multiLineCodeBlock.Language)
-            ? $"language-{multiLineCodeBlock.Language}"
+            ? $"language-{HtmlEncode(multiLineCodeBlock.Language)}"
             : "nohighlight";
 
         buffer.Append(
