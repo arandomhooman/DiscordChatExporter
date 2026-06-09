@@ -49,6 +49,11 @@ public static class ExportCatalogBuilder
     private static bool IsBareExportFileName(string? fileName) =>
         !string.IsNullOrEmpty(fileName)
         && fileName is not "." and not ".."
+        // Reject BOTH separators regardless of host OS: a manifest authored on Windows uses '\',
+        // which Linux does not treat as a separator, so Path.GetFileName alone would let it slip
+        // through there. A legitimate bare filename never contains either separator.
+        && !fileName.Contains('/')
+        && !fileName.Contains('\\')
         && fileName == Path.GetFileName(fileName);
 
     // Returns the directories under rootDir (inclusive) that contain a manifest.json.
