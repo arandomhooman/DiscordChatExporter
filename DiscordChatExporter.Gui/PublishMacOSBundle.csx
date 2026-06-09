@@ -1,5 +1,6 @@
 #!/usr/bin/dotnet --
 #:package CliFx@3.0.0
+#:property ManagePackageVersionsCentrally=false
 
 using CliFx;
 using CliFx.Binding;
