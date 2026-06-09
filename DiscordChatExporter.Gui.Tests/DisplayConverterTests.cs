@@ -37,23 +37,45 @@ public sealed class DisplayConverterTests
     {
         var timestamp = new DateTimeOffset(2026, 06, 08, 14, 30, 0, TimeSpan.Zero);
 
-        TimestampToStringConverter
-            .Instance.Convert(timestamp, typeof(string), null, CultureInfo.GetCultureInfo("en-US"))
-            .Should()
-            .Be("6/8/2026 2:30 PM");
+        var result = TimestampToStringConverter.Instance.Convert(
+            timestamp,
+            typeof(string),
+            null,
+            CultureInfo.GetCultureInfo("en-US")
+        );
+
+        NormalizeSpaces(result).Should().Be("6/8/2026 2:30 PM");
     }
 
     [Fact]
     public void Timestamp_converter_formats_parseable_timestamp_strings()
     {
-        TimestampToStringConverter
-            .Instance.Convert(
-                "2026-06-08T14:30:00+00:00",
-                typeof(string),
-                null,
-                CultureInfo.GetCultureInfo("en-US")
-            )
-            .Should()
-            .Be("6/8/2026 2:30 PM");
+        var result = TimestampToStringConverter.Instance.Convert(
+            "2026-06-08T14:30:00+00:00",
+            typeof(string),
+            null,
+            CultureInfo.GetCultureInfo("en-US")
+        );
+
+        NormalizeSpaces(result).Should().Be("6/8/2026 2:30 PM");
+    }
+
+    // .NET's ICU-backed date formatting on Linux separates the time from the AM/PM designator with a
+    // narrow no-break space (U+202F); Windows NLS uses a regular space. Collapse every whitespace
+    // character to a regular space so the assertions verify the formatted value rather than the
+    // platform's choice of space character.
+    private static string? NormalizeSpaces(object? value)
+    {
+        if (value is not string text)
+            return null;
+
+        var chars = text.ToCharArray();
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (char.IsWhiteSpace(chars[i]))
+                chars[i] = ' ';
+        }
+
+        return new string(chars);
     }
 }

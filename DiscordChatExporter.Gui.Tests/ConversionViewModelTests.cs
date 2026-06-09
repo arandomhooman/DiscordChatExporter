@@ -321,8 +321,11 @@ public sealed class ConversionViewModelTests : IDisposable
             pathComparerForPath: _ => StringComparer.Ordinal
         );
         viewModel.IsCsvSelected = true;
-        viewModel.SourceFilePaths.Add("C:\\sources\\one\\chat.json");
-        viewModel.SourceFilePaths.Add("C:\\sources\\two\\CHAT.json");
+        // Source files live in different folders but share a base name differing only by case. Build
+        // the paths with Path.Combine so GetFileNameWithoutExtension extracts "chat"/"CHAT" on every
+        // OS — a hardcoded backslash path keeps the whole prefix on Linux, so the outputs never collide.
+        viewModel.SourceFilePaths.Add(Path.Combine(_dir, "one", "chat.json"));
+        viewModel.SourceFilePaths.Add(Path.Combine(_dir, "two", "CHAT.json"));
 
         await viewModel.ConvertCommand.ExecuteAsync(null);
 
@@ -342,8 +345,11 @@ public sealed class ConversionViewModelTests : IDisposable
             pathComparerForPath: _ => StringComparer.OrdinalIgnoreCase
         );
         viewModel.IsCsvSelected = true;
-        viewModel.SourceFilePaths.Add("C:\\sources\\one\\chat.json");
-        viewModel.SourceFilePaths.Add("C:\\sources\\two\\CHAT.json");
+        // Source files live in different folders but share a base name differing only by case. Build
+        // the paths with Path.Combine so GetFileNameWithoutExtension extracts "chat"/"CHAT" on every
+        // OS — a hardcoded backslash path keeps the whole prefix on Linux, so the outputs never collide.
+        viewModel.SourceFilePaths.Add(Path.Combine(_dir, "one", "chat.json"));
+        viewModel.SourceFilePaths.Add(Path.Combine(_dir, "two", "CHAT.json"));
 
         await viewModel.ConvertCommand.ExecuteAsync(null);
 
